@@ -29,6 +29,17 @@ export const waitLevel = (elapsedMs: number): WaitLevel => {
 }
 
 /**
+ * Ordem canônica do semáforo, do mais brando ao mais urgente. É o que permite ordenar a fila de
+ * atenção (vermelho primeiro) sem repetir a ordem dos níveis em cada agregação.
+ */
+export const WAIT_LEVEL_SEVERITY: Record<WaitLevel, number> = {
+  verde: 0,
+  amarelo: 1,
+  laranja: 2,
+  vermelho: 3
+}
+
+/**
  * Tempo desde a mensagem do cliente que aguarda resposta, em ms; `null` quando a conversa não está
  * aguardando (`clientSince` é gravado/zerado pelo store a partir da última mensagem).
  */
