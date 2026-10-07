@@ -49,7 +49,7 @@ cp .env.example .env   # e preencha PLASMO_PUBLIC_OPENROUTER_API_KEY
 
 ```sh
 pnpm dev        # gera build/chrome-mv3-dev com hot reload
-pnpm test       # vitest: prompts, parse (inclusive o JSON parcial do streaming), serviço, adapter do Botconversa (fixture HTML) e tracking do dia (data local, virada de dia, semáforo de espera, redutores, merge entre abas e agregações)
+pnpm test       # vitest: prompts, parse (inclusive o JSON parcial do streaming), serviço, adapter do Botconversa (fixture HTML) e tracking do dia (data local, virada de dia, semáforo de espera, redutores, merge entre abas, persistência no storage com stub de `chrome` e agregações)
 pnpm typecheck
 ```
 

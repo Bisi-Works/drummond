@@ -146,6 +146,24 @@ describe("summarizeDay", () => {
     expect(summary.alerts).toBe(0)
   })
 
+  it("não enxerga conversas de outro dia", () => {
+    const day1 = day(
+      [conversation({ key: "chat-1", clientSince: NOW - 60_000 })],
+      "2026-10-07"
+    )
+    const day2 = day(
+      [conversation({ key: "chat-2", clientSince: null, lastMessageAuthor: "vendedor" })],
+      "2026-10-08"
+    )
+
+    expect(summarizeDay(day1, NOW).conversations).toBe(1)
+    expect(summarizeDay(day2, NOW).conversations).toBe(1)
+    expect(summarizeDay(day1, NOW).waiting).toBe(1)
+    expect(summarizeDay(day2, NOW).answered).toBe(1)
+    expect(attentionQueue(day1, NOW).map((item) => item.conversation.key)).toEqual(["chat-1"])
+    expect(attentionQueue(day2, NOW)).toEqual([])
+  })
+
   it("dia vazio zera os totais e não devolve média inventada", () => {
     const summary = summarizeDay(emptyDay("2026-10-07"), NOW)
     expect(summary).toEqual({

@@ -180,6 +180,14 @@ describe("dayKey", () => {
     expect(dayKey(new Date(2026, 0, 5, 8, 0))).toBe("2026-01-05")
   })
 
+  it("dá chaves distintas para 23:59 e 00:01, sem juntar os dois dias", () => {
+    const antesDaMeiaNoite = new Date(2026, 9, 7, 23, 59)
+    const depoisDaMeiaNoite = new Date(2026, 9, 8, 0, 1)
+    expect(dayKey(antesDaMeiaNoite)).toBe("2026-10-07")
+    expect(dayKey(depoisDaMeiaNoite)).toBe("2026-10-08")
+    expect(dayKey(antesDaMeiaNoite)).not.toBe(dayKey(depoisDaMeiaNoite))
+  })
+
   it("sem argumento, usa o dia local de agora", () => {
     const now = new Date()
     const expected = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(

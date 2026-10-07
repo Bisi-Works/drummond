@@ -91,9 +91,19 @@ final da fase, `pnpm test` e `pnpm typecheck` passam e o painel lateral exibe o 
 > - **Só a data do próprio dia:** `saveDayMerged` lê e grava exclusivamente `drummond.dayLog.<day.date>`, então dias anteriores continuam intactos e consultáveis pelo relatório (a próxima fase lê por data). `mergeDayLogs` é puro e nunca olha datas vizinhas.
 > - **Verificação:** `tsc --noEmit` → **exit 0** e `vitest run` → **170/170** (162 anteriores + 8 novos: 4 de `rolloverDate`, incluindo 23:59 nulo, 00:01 no dia seguinte, virada de ano e o primeiro segundo após a meia-noite; e 4 de `mergeDayLogs`, cobrindo união de conversas, versão mais recente vencendo, contadores sem regressão + revisão mais nova, e coaching preservado de um só lado).
 
-- [ ] Escrever testes que cubram a virada de dia e a sincronização de forma isolada:
+- [x] Escrever testes que cubram a virada de dia e a sincronização de forma isolada:
   - Teste de `dayKey` com datas locais próximas da meia-noite (23:59 e 00:01) confirmando chaves distintas.
   - Teste de `loadDay`/`saveDay` com um stub simples de `chrome.storage.local` injetado em `globalThis`, confirmando round-trip e que a falha de storage devolve um dia vazio.
   - Teste garantindo que `summarizeDay` de um dia não enxerga conversas de outro.
+
+> **Virada de dia e sincronização cobertas de forma isolada (2026-10-07).** `tests/tracking-storage.test.ts` (novo, 10 casos em 3 `describe`) + um caso em `tests/tracking.test.ts` (`dayKey`) e um em `tests/tracking-summary.test.ts` (`summarizeDay`). `vitest run` → **182/182** (170 anteriores + 12 novos) e `tsc --noEmit` → **exit 0**.
+> - **`dayKey` (1 caso novo):** 23:59 em `2026-10-07` e 00:01 em `2026-10-08` dão chaves distintas (`2026-10-07` vs `2026-10-08`), sem juntar os dois dias — o `dayKey` já tinha o caso de 23:59 não cair em UTC; este acrescenta o par.
+> - **Storage com stub (10 casos, arquivo próprio):** um `chrome.storage.local` de mentira (`get`/`set`/`remove` sobre um `Map`, mais `onChanged` com `addListener`/`removeListener`) é injetado em `globalThis` via `Object.defineProperty` no início de cada teste e removido no `afterEach`. O arquivo separado é proposital: como os testes puros (`tracking.test.ts`, `tracking-summary.test.ts`) juram não tocar em `chrome`, a injeção fica isolada e não contamina os outros (o Vitest já roda cada arquivo num worker).
+>   - **Round-trip:** `saveDay` grava em `drummond.dayLog.<data>` e `loadDay` devolve o mesmo objeto já normalizado.
+>   - **Isolamento por data:** dois dias em chaves separadas; `loadDay` de um não enxerga conversa do outro e a data sem gravação volta vazia (nada herdado do dia anterior).
+>   - **Falhas:** leitura que lança → `emptyDay(date)`; sem `chrome` nenhum (extensão recarregada) → `emptyDay(date)`; gravação que lança não propaga e preserva o valor anterior.
+>   - **`saveDayMerged`:** gravação de uma aba junta as conversas da outra no mesmo dia (read-modify-write) e não toca na chave de outra data.
+>   - **`subscribeDay`:** evento de `chrome.storage.onChanged` na área `local` entrega o `DayLog` normalizado com a data extraída do sufixo da chave, ignora chaves que não são de dia e a área `sync`, e o `unsubscribe` remove o listener de verdade (e não quebra sem `chrome.storage.onChanged`).
+> - **`summarizeDay` (1 caso novo):** um dia aguardando (`2026-10-07`) e um respondido (`2026-10-08`) são agregados em separado — `conversations`/`waiting`/`answered` de um não contam o outro, e a `attentionQueue` de cada dia só vê a própria conversa (a do dia respondido fica vazia).
 
 - [ ] Rodar `pnpm test` e `pnpm typecheck`, corrigir as falhas e confirmar que nenhum teste anterior foi enfraquecido.
