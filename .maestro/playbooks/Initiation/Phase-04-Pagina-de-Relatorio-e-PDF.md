@@ -76,4 +76,10 @@ página externa → PDF — funciona de ponta a ponta.
 >
 > **Verificação:** `corepack pnpm test` → **232/232** (11 novos); `corepack pnpm typecheck` → exit 0. A checagem de `pnpm build`/`pnpm check:bundle` fica para a próxima tarefa, que já é a validação final da fase.
 
-- [ ] Rodar `pnpm test`, `pnpm typecheck` e `pnpm build`, corrigindo as falhas; em seguida rodar `pnpm check:bundle` para garantir que a nova tab e o novo handler não quebram a build de produção (o Plasmo pode descartar código no tree-shaking, como o README alerta).
+- [x] Rodar `pnpm test`, `pnpm typecheck` e `pnpm build`, corrigindo as falhas; em seguida rodar `pnpm check:bundle` para garantir que a nova tab e o novo handler não quebram a build de produção (o Plasmo pode descartar código no tree-shaking, como o README alerta).
+
+> **Validação final da fase concluída (2026-10-07): tudo verde, nenhuma correção necessária.** `corepack pnpm test` → **232/232** (17 arquivos); `corepack pnpm typecheck` → exit 0; `corepack pnpm build` → exit 0, `tabs/report.html` + `tabs/report.*.js|css` emitidos, com as três rotas do background (`generate-report`, `open-report`, `review-draft`) no service worker; `corepack pnpm check:bundle` → **23/23 OK**, incluindo "generate-report responde (ok)", "content script referencia as rotas generate-report/open-report (sem a chave da API)" e "chave só no background". Nenhum ajuste de código foi preciso nesta tarefa — a build não quebrou a tab nova nem o handler, então o tree-shaking não descartou nada.
+>
+> **Manifesto da build de produção:** `permissions: ["sidePanel", "storage"]` (sem a permissão `tabs`), `host_permissions: ["https://openrouter.ai/*"]`, `side_panel.default_path: sidepanel.html`. O único `web_accessible_resources` continua sendo o do content script no Botconversa, com o woff2 do report — como já registrado na tarefa da página; a página `tabs/report.html` é aberta pela própria extensão e não precisa constar ali.
+>
+> **Nota de execução:** `pnpm` não está no PATH deste shell (usei `corepack pnpm`), e o `scripts/check-bundle.mjs` lê a chave do `.env` — criei um `.env` temporário só com `PLASMO_PUBLIC_OPENROUTER_API_KEY=sk-or-v1-smoke-test-only` para a build de fumaça e o removi em seguida (`.env` é ignorado pelo git, então nada vazou nem ficou para trás). Com esta tarefa, a Fase 04 fica inteiramente concluída.
