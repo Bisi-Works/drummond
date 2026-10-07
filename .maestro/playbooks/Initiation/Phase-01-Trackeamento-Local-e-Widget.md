@@ -89,9 +89,15 @@ aparece de verdade na página do Botconversa. Nenhuma decisão do usuário é ne
 > - **Minimizar/expandir:** botão no cabeçalho persiste `minimized` junto da posição.
 > - **Verificação:** `tsc --noEmit` compila o componente sem erros (permanece só o erro pré-existente de `src/contents/companion.tsx:109`, que a última tarefa resolve) e `vitest run` → 109/109. Ainda não está montado no content script — isso é a próxima tarefa.
 
-- [ ] Reestruturar `src/contents/companion.tsx` para o widget existir independentemente do campo de texto:
+- [x] Reestruturar `src/contents/companion.tsx` para o widget existir independentemente do campo de texto:
   - O guard atual `if (!adapter || !composer || !frame) return null` deve deixar de esconder o widget: renderizar `<DayWidget />` sempre que `adapter` existir (mesmo sem conversa aberta), e manter o botão "Revisar" e o `SuggestionCard` exatamente como hoje, apenas quando `composer` e `frame` existirem.
   - Garantir que o widget respeite o tema (`dark` vindo do `useTheme`) e o shadow DOM já montado, sem vazar CSS para a página.
+
+> **Widget montado no content script (2026-10-07).** Só `src/contents/companion.tsx` e o bullet novo do README:
+> - O guard virou `if (!adapter) return null` (depois de todos os hooks) e o corpo passou a ser `<DayWidget adapter={adapter} />` seguido de um bloco condicional `composerFrame = composer && frame` que mantém o botão "Revisar" e o `SuggestionCard` byte a byte iguais — o `composerFrame` também faz o narrowing de TS que o guard antigo fazia, sem `!`/cast.
+> - Sem campo de texto o widget continua na página (conversa aberta sem composer montado); sem adapter nada é injetado, como antes. `useDayTracking` agora roda sempre que há adapter, que é o objetivo da fase.
+> - **Tema/shadow DOM:** o widget fica dentro do wrapper `dark`/`font-sans` que já envolvia o card e herda o `useTheme` sem código novo; `getStyle` continua trocando `:root` → `:host(plasmo-csui)` e o `DayWidget` só usa variáveis de tema (`bg-surface`, `text-fg`, `border-line`), então nada vaza para a página.
+> - **Verificação:** `vitest run` → 109/109 (nenhum teste cobre o content script hoje). `tsc --noEmit` segue com **apenas** o erro pré-existente de `src/contents/companion.tsx` (`sendToBackground` tipa a resposta como `never`; a linha só andou de 109 para 110), que a última tarefa da fase resolve — não mexi nele para não misturar escopos.
 
 - [ ] Escrever `tests/tracking.test.ts` cobrindo a lógica pura (sem depender de rede ou de IA):
   - `waitLevel` nos limites exatos (6/12/18 min e acima), `dayKey` com uma data local fixa, e `waitElapsed` para os casos aguardando vs. respondido.

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { getAdapter } from "~adapters"
 import type { ReviewDraftRequest, ReviewDraftResponse } from "~background/messages/review-draft"
 import { GlassesMark } from "~components/Brand"
+import { DayWidget } from "~components/DayWidget"
 import { Spinner } from "~components/Spinner"
 import { SuggestionCard, type ReviewState } from "~components/SuggestionCard"
 import { useComposerState, type Box } from "~hooks/useComposerState"
@@ -131,46 +132,61 @@ const Companion = () => {
     setTimeout(() => setCopied(false), 1500)
   }
 
-  if (!adapter || !composer || !frame) return null
+  // Só o adapter é indispensável: o widget do dia existe mesmo sem conversa aberta (o campo de
+  // texto pode não estar montado). O botão "Revisar" e o card continuam presos ao campo.
+  if (!adapter) return null
 
+  const composerFrame = composer && frame
   const hasDraft = draft.trim().length > 0
-  const cardWidth = Math.min(CARD_MAX_WIDTH, Math.max(frame.width, CARD_MIN_WIDTH))
+  const cardWidth = composerFrame
+    ? Math.min(CARD_MAX_WIDTH, Math.max(composerFrame.width, CARD_MIN_WIDTH))
+    : CARD_MAX_WIDTH
 
   return (
     <div className={theme === "dark" ? "dark font-sans" : "font-sans"}>
-      <button
-        type="button"
-        onClick={review.kind === "idle" ? runReview : dismiss}
-        disabled={!hasDraft && review.kind === "idle"}
-        title={hasDraft ? "Revisar a mensagem com IA" : "Digite uma mensagem para revisar"}
-        style={{ position: "fixed", height: BUTTON_HEIGHT, ...buttonPosition(frame, buttonAnchor) }}
-        className="flex items-center gap-1.5 rounded-full border border-black bg-black pl-2.5 pr-3 text-xs font-medium text-white shadow-sm transition hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-white disabled:text-gray-400 disabled:shadow-none">
-        {review.kind === "loading" ? (
-          <Spinner className="h-3.5 w-3.5" />
-        ) : (
-          <GlassesMark className="h-[11px] w-[18px]" />
-        )}
-        {copied ? "Copiado ✓" : review.kind === "idle" ? "Revisar" : "Fechar"}
-      </button>
+      <DayWidget adapter={adapter} />
 
-      {review.kind !== "idle" && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: window.innerHeight - frame.top + CARD_GAP,
-            right: window.innerWidth - frame.right,
-            width: cardWidth
-          }}>
-          <SuggestionCard
-            state={review}
-            currentDraft={draft}
-            applyError={applyError}
-            onApply={apply}
-            onCopy={copy}
-            onRetry={runReview}
-            onDismiss={dismiss}
-          />
-        </div>
+      {composerFrame && (
+        <>
+          <button
+            type="button"
+            onClick={review.kind === "idle" ? runReview : dismiss}
+            disabled={!hasDraft && review.kind === "idle"}
+            title={hasDraft ? "Revisar a mensagem com IA" : "Digite uma mensagem para revisar"}
+            style={{
+              position: "fixed",
+              height: BUTTON_HEIGHT,
+              ...buttonPosition(composerFrame, buttonAnchor)
+            }}
+            className="flex items-center gap-1.5 rounded-full border border-black bg-black pl-2.5 pr-3 text-xs font-medium text-white shadow-sm transition hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-white disabled:text-gray-400 disabled:shadow-none">
+            {review.kind === "loading" ? (
+              <Spinner className="h-3.5 w-3.5" />
+            ) : (
+              <GlassesMark className="h-[11px] w-[18px]" />
+            )}
+            {copied ? "Copiado ✓" : review.kind === "idle" ? "Revisar" : "Fechar"}
+          </button>
+
+          {review.kind !== "idle" && (
+            <div
+              style={{
+                position: "fixed",
+                bottom: window.innerHeight - composerFrame.top + CARD_GAP,
+                right: window.innerWidth - composerFrame.right,
+                width: cardWidth
+              }}>
+              <SuggestionCard
+                state={review}
+                currentDraft={draft}
+                applyError={applyError}
+                onApply={apply}
+                onCopy={copy}
+                onRetry={runReview}
+                onDismiss={dismiss}
+              />
+            </div>
+          )}
+        </>
       )}
     </div>
   )
