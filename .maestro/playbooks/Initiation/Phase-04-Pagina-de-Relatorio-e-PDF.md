@@ -31,10 +31,20 @@ página externa → PDF — funciona de ponta a ponta.
 >
 > **Verificação:** `corepack pnpm typecheck` → exit 0; `corepack pnpm test` → **217/217**; `corepack pnpm build` → `tabs/report.html` presente; `corepack pnpm check:bundle` → 20/20 OK (rodei com um `.env` temporário só com a chave de fumaça, removido em seguida; o script lê `.env` e exige a chave). `pnpm` não está no PATH deste shell — usei `corepack pnpm`. Observação: o Plasmo renomeou o `web_accessible_resources` do woff2 compartilhado de `companion.*.woff2` para `tabs/report.*.woff2` (a fonte é embutida em base64; o arquivo não é emitido), o mesmo comportamento de antes, sem regressão de build.
 
-- [ ] Adicionar as ações de exportação na página do relatório:
+- [x] Adicionar as ações de exportação na página do relatório:
   - Botão "Imprimir / Salvar PDF" chamando `window.print()`, com `@media print` escondendo botões/navegação e ajustando margens e cores (evitar fundo preto no papel).
   - Botão "Baixar HTML" gerando um `Blob` de `buildStandaloneHtml(stored)` e disparando o download via link `URL.createObjectURL` + `a[download]`, revogando a URL depois.
   - Botão "Copiar JSON" (opcional, útil para depurar) copiando o relatório serializado com `navigator.clipboard.writeText`.
+
+> **Barra de exportação entregue (2026-10-07).** `src/tabs/report.tsx` ganhou o componente `ExportActions`, montado logo abaixo do cabeçalho e **apenas** quando há relatório carregado (`state.kind === "ready"`), dentro do bloco `no-print` — o `@media print` que já existia na página esconde a barra inteira no papel, então o PDF/impressão sai só com cabeçalho, resumo, seções, métricas e rodapé. Os três botões:
+>
+> - **Imprimir / Salvar PDF** (primário, vermelho da marca) chama `window.print()`; as margens A4 e a remoção do fundo preto já vinham do `PRINT_STYLE` da tarefa anterior.
+> - **Baixar HTML** (secundário) monta `new Blob([buildStandaloneHtml(stored)], { type: "text/html;charset=utf-8" })` e dispara o download por um `<a download>` temporário (`downloadBlob`), com `URL.revokeObjectURL` 1 s depois do clique — revogar na hora pode salvar arquivo vazio. O nome vem de `reportFileName(stored.date)`.
+> - **Copiar JSON** (secundário) copia `JSON.stringify(stored, null, 2)` com `navigator.clipboard.writeText`, confirma com "Copiado!" (ícone de check) por 2 s e mostra "Não foi possível copiar" quando o clipboard está bloqueado/indisponível — sem quebrar a página.
+>
+> Ícones de Feather (impressora, download, cópia e check) em SVG inline, no mesmo estilo do `ThemeToggle`. Os botões reaproveitam as classes Tailwind do projeto (`bg-brand`/`hover:bg-brand-dark` e `border-line bg-surface text-fg`).
+>
+> **Verificação:** `corepack pnpm typecheck` → exit 0; `corepack pnpm test` → **217/217** (nenhum teste novo nesta tarefa; os testes de `report-format` são a tarefa `tests/report-format.test.ts`). A build/`check:bundle` fica para a tarefa de validação final da fase.
 
 - [ ] Adicionar o botão "Encerrar o dia" no `src/components/DayWidget.tsx`:
   - Ficará desabilitado (com dica) quando não houver nenhuma conversa acompanhada no dia; caso contrário, ao clicar: monta `buildReportInput(day, now)`, chama `sendToBackground<GenerateReportRequest, GenerateReportResponse>({ name: "generate-report", body })`, e em caso de sucesso salva com `saveReport` e abre `chrome.tabs.create({ url: chrome.runtime.getURL(`tabs/report.html?date=${date}`) })`.

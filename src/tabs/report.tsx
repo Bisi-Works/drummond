@@ -8,8 +8,10 @@ import { ThemeToggle } from "~components/ThemeToggle"
 import { useTheme } from "~hooks/useTheme"
 import { registerBrandFont } from "~lib/brand-font"
 import {
+  buildStandaloneHtml,
   formatDayLabel,
   formatTimestamp,
+  reportFileName,
   reportMetrics,
   reportSections
 } from "~lib/report/format"
@@ -24,8 +26,9 @@ registerBrandFont()
 // explica no próprio estado vazio como gerar (botão "Encerrar o dia" no widget do Botconversa).
 //
 // O trabalho pesado de montar o texto fica em `~lib/report/format`: aqui só se lê o `StoredReport`
-// do storage e se escolhe o que renderizar. Os botões de imprimir/baixar entram numa tarefa
-// seguinte; esta página já nasce pronta para eles (o `.no-print` esconde a navegação no papel).
+// do storage e se escolhe o que renderizar. A barra de exportação (imprimir/PDF, baixar `.html` e
+// copiar JSON) fica em `ExportActions` e some no papel pelo `.no-print`, então o PDF sai só com o
+// relatório.
 
 /** Data YYYY-MM-DD do parâmetro de busca; `null` quando ausente ou fora do formato. */
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -61,6 +64,124 @@ type ReportState =
   /** Sem relatório: `date` é a data pedida em `?date=`, quando havia uma. */
   | { kind: "empty"; date: string | null }
   | { kind: "ready"; stored: StoredReport }
+
+// Ícones de Feather (MIT), no mesmo estilo do `ThemeToggle`, para os botões da barra de exportação.
+const iconProps = {
+  className: "h-4 w-4",
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  "aria-hidden": true
+} as const
+
+const PrinterIcon = () => (
+  <svg {...iconProps}>
+    <polyline points="6 9 6 2 18 2 18 9" />
+    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+    <rect x="6" y="14" width="12" height="8" />
+  </svg>
+)
+
+const DownloadIcon = () => (
+  <svg {...iconProps}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="15" x2="12" y2="3" />
+  </svg>
+)
+
+const CopyIcon = () => (
+  <svg {...iconProps}>
+    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+)
+
+const CheckIcon = () => (
+  <svg {...iconProps}>
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+)
+
+/** Classe dos botões secundários (Baixar HTML / Copiar JSON), irmãos do primário da marca. */
+const secondaryButton =
+  "flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-fg transition hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+
+/**
+ * Dispara o download de um Blob com o nome pedido. A URL do Blob é revogada depois do clique: o
+ * navegador lê o conteúdo de forma assíncrona, então revogar imediatamente pode salvar um arquivo
+ * vazio — um tique curto deixa o download começar antes de liberar a memória.
+ */
+const downloadBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = filename
+  link.rel = "noopener"
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+/**
+ * Barra de exportação do relatório, visível só quando há relatório carregado e escondida no papel
+ * (`.no-print`). São três saídas para o mesmo conteúdo: o PDF do navegador (`window.print()`), o
+ * `.html` autocontido de `buildStandaloneHtml` e o JSON cru do `StoredReport`, útil para depurar.
+ */
+const ExportActions = ({ stored }: { stored: StoredReport }) => {
+  const [copy, setCopy] = useState<"idle" | "copied" | "error">("idle")
+
+  // Volta o rótulo do botão ao normal sozinho, sem deixar "Copiado!" preso na tela.
+  useEffect(() => {
+    if (copy === "idle") return
+    const timer = window.setTimeout(() => setCopy("idle"), 2000)
+    return () => window.clearTimeout(timer)
+  }, [copy])
+
+  const onDownload = () =>
+    downloadBlob(
+      new Blob([buildStandaloneHtml(stored)], { type: "text/html;charset=utf-8" }),
+      reportFileName(stored.date)
+    )
+
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(stored, null, 2))
+      setCopy("copied")
+    } catch {
+      // Clipboard bloqueado (contexto sem permissão) ou indisponível: avisa no próprio botão.
+      setCopy("error")
+    }
+  }
+
+  return (
+    <div className="no-print flex flex-wrap items-center gap-2 border-b border-line bg-muted/40 px-7 py-3">
+      <button
+        type="button"
+        onClick={() => window.print()}
+        className="flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-dark focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface">
+        <PrinterIcon />
+        Imprimir / Salvar PDF
+      </button>
+      <button type="button" onClick={onDownload} className={secondaryButton}>
+        <DownloadIcon />
+        Baixar HTML
+      </button>
+      <button
+        type="button"
+        onClick={() => void onCopy()}
+        aria-live="polite"
+        className={secondaryButton}>
+        {copy === "copied" ? <CheckIcon /> : <CopyIcon />}
+        {copy === "copied" ? "Copiado!" : copy === "error" ? "Não foi possível copiar" : "Copiar JSON"}
+      </button>
+    </div>
+  )
+}
 
 /** Um bloco titulado do relatório (mesmo vocabulário visual das seções do painel). */
 const SectionBlock = ({ title, children }: { title: string; children: React.ReactNode }) => (
@@ -195,6 +316,8 @@ const ReportPage = () => {
 
           {state.kind === "ready" && (
             <>
+              <ExportActions stored={state.stored} />
+
               <SectionBlock title="Resumo geral">
                 <p className="text-base leading-relaxed text-fg">{state.stored.report.resumo}</p>
               </SectionBlock>
