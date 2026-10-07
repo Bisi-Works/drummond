@@ -3,9 +3,16 @@ import { describe, expect, it } from "vitest"
 import type { ChatMessage } from "~adapters/types"
 import type { CoachingReport, DraftReview } from "~lib/ai/schemas"
 import { WAIT_LIMITS_MS } from "~lib/tracking/constants"
-import { conversationLabel, dayKey, waitElapsed, waitLevel } from "~lib/tracking/level"
+import { conversationLabel, dayKey, rolloverDate, waitElapsed, waitLevel } from "~lib/tracking/level"
 import { coachingSignal, reviewSignal, reviewSummary } from "~lib/tracking/signals"
-import { attachCoaching, attachReview, emptyDay, observeConversation, toDayLog } from "~lib/tracking/store"
+import {
+  attachCoaching,
+  attachReview,
+  emptyDay,
+  mergeDayLogs,
+  observeConversation,
+  toDayLog
+} from "~lib/tracking/store"
 import type { ConversationObservation } from "~lib/tracking/store"
 import type { DayLog, TrackedConversation } from "~lib/tracking/types"
 
@@ -470,5 +477,94 @@ describe("virada de dia", () => {
       reviewCount: 0,
       clientSince: 2_000
     })
+  })
+})
+
+describe("rolloverDate", () => {
+  it("é nulo enquanto a data local não muda", () => {
+    expect(rolloverDate("2026-10-07", new Date(2026, 9, 7, 23, 59).getTime())).toBeNull()
+  })
+
+  it("devolve a nova data um minuto depois da meia-noite", () => {
+    expect(rolloverDate("2026-10-07", new Date(2026, 9, 8, 0, 1).getTime())).toBe("2026-10-08")
+  })
+
+  it("reconhece a virada de ano", () => {
+    expect(rolloverDate("2026-12-31", new Date(2027, 0, 1, 0, 1).getTime())).toBe("2027-01-01")
+  })
+
+  it("detecta a virada assim que o relógio cruza a meia-noite", () => {
+    expect(rolloverDate("2026-10-07", new Date(2026, 9, 8, 0, 0, 1).getTime())).toBe("2026-10-08")
+  })
+})
+
+describe("mergeDayLogs", () => {
+  const dayWith = (
+    date: string,
+    conversations: Record<string, Partial<TrackedConversation>>,
+    updatedAt = 0
+  ): DayLog => ({
+    date,
+    updatedAt,
+    conversations: Object.fromEntries(
+      Object.entries(conversations).map(([key, over]) => [key, conversation({ key, ...over })])
+    )
+  })
+
+  it("junta conversas diferentes das duas gravações sem perder nenhuma", () => {
+    const stored = dayWith("2026-10-07", { "chat-1": { lastSeenAt: 1_000 } }, 1_000)
+    const local = dayWith("2026-10-07", { "chat-2": { lastSeenAt: 2_000 } }, 2_000)
+    const merged = mergeDayLogs(stored, local)
+    expect(Object.keys(merged.conversations).sort()).toEqual(["chat-1", "chat-2"])
+    expect(merged.updatedAt).toBe(2_000)
+    expect(merged.date).toBe("2026-10-07")
+  })
+
+  it("na mesma conversa, o registro visto mais recentemente vence", () => {
+    const stored = dayWith(
+      "2026-10-07",
+      { "chat-1": { lastSeenAt: 1_000, lastMessageText: "antigo", clientSince: 1_000 } },
+      1_000
+    )
+    const local = dayWith(
+      "2026-10-07",
+      { "chat-1": { lastSeenAt: 3_000, lastMessageText: "novo", clientSince: null } },
+      3_000
+    )
+    const merged = mergeDayLogs(stored, local)
+    expect(merged.conversations["chat-1"].lastMessageText).toBe("novo")
+    expect(merged.conversations["chat-1"].clientSince).toBeNull()
+  })
+
+  it("não regride contadores e preserva a revisão mais recente", () => {
+    const stored = dayWith("2026-10-07", {
+      "chat-1": {
+        lastSeenAt: 3_000,
+        messageCount: 5,
+        reviewCount: 2,
+        lastReview: { status: "ok", summary: "antiga", at: 1_000 }
+      }
+    })
+    const local = dayWith("2026-10-07", {
+      "chat-1": {
+        lastSeenAt: 2_000,
+        messageCount: 1,
+        reviewCount: 1,
+        lastReview: { status: "ajustes", summary: "nova", at: 2_000 }
+      }
+    })
+    const merged = mergeDayLogs(stored, local)
+    expect(merged.conversations["chat-1"].messageCount).toBe(5)
+    expect(merged.conversations["chat-1"].reviewCount).toBe(2)
+    expect(merged.conversations["chat-1"].lastReview?.summary).toBe("nova")
+  })
+
+  it("mantém o coaching que só existe de um lado", () => {
+    const stored = dayWith("2026-10-07", {
+      "chat-1": { lastSeenAt: 1_000, lastCoaching: { summary: "escuta", nextStep: "seguir", at: 900 } }
+    })
+    const local = dayWith("2026-10-07", { "chat-1": { lastSeenAt: 2_000 } })
+    const merged = mergeDayLogs(stored, local)
+    expect(merged.conversations["chat-1"].lastCoaching?.nextStep).toBe("seguir")
   })
 })

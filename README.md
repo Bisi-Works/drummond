@@ -22,7 +22,9 @@ cabeçalho do painel lateral troca para o claro, e a escolha vale também para o
   linhas sobem para o topo com destaque colorido, e o rodapé traz os totais do dia (acompanhadas,
   aguardando, respondidas) e a média até a primeira resposta. O registro é local
   (`chrome.storage.local`), sincroniza entre as abas e não faz nenhuma chamada de IA: revisões e
-  coachings já feitos aparecem anexados à conversa.
+  coachings já feitos aparecem anexados à conversa. À meia-noite o widget recomeça no dia novo sem
+  apagar o anterior (que continua no storage, consultável pelo relatório), e cada gravação junta o
+  dia ao que já está salvo — duas abas em conversas diferentes não se sobrescrevem.
 - **Resumo do dia no painel**: acima da análise, o painel lateral abre com os mesmos totais do
   widget (acompanhadas, aguardando, respondidas, revisões, coachings e médias) e a fila de atenção
   com chips coloridos e tempo de espera. Lê o mesmo `chrome.storage.local`, então widget e painel
@@ -47,7 +49,7 @@ cp .env.example .env   # e preencha PLASMO_PUBLIC_OPENROUTER_API_KEY
 
 ```sh
 pnpm dev        # gera build/chrome-mv3-dev com hot reload
-pnpm test       # vitest: prompts, parse (inclusive o JSON parcial do streaming), serviço, adapter do Botconversa (fixture HTML) e tracking do dia (data local, semáforo de espera, redutores e agregações)
+pnpm test       # vitest: prompts, parse (inclusive o JSON parcial do streaming), serviço, adapter do Botconversa (fixture HTML) e tracking do dia (data local, virada de dia, semáforo de espera, redutores, merge entre abas e agregações)
 pnpm typecheck
 ```
 

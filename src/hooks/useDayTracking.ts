@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { ChatAdapter, ChatMessage } from "~adapters/types"
 import { config as appConfig } from "~lib/config"
-import { conversationLabel, dayKey } from "~lib/tracking/level"
+import { conversationLabel, dayKey, rolloverDate } from "~lib/tracking/level"
 import { attentionQueue, summarizeDay, type AttentionItem, type DaySummary } from "~lib/tracking/summary"
 import {
   emptyDay,
   loadDay,
   observeConversation,
-  saveDay,
+  saveDayMerged,
   subscribeDay,
   type ConversationObservation
 } from "~lib/tracking/store"
@@ -70,15 +70,20 @@ export const useDayTracking = (adapter: ChatAdapter | null, intervalMs = 1000): 
   const [now, setNow] = useState(() => Date.now())
   const dayRef = useRef(day)
   // Enquanto o dia está sendo lido do storage não observamos nada, para o tick não sobrescrever o
-  // log com o dia vazio inicial (nem perder o que outra aba gravou).
+  // log com o dia vazio inicial (nem perder o que outra aba gravou). `loadingRef` evita que os
+  // ticks seguintes, na mesma virada de dia, disparem leituras concorrentes da mesma data.
   const readyRef = useRef(false)
+  const loadingRef = useRef<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
 
     const load = async (date: string) => {
+      if (loadingRef.current === date) return
+      loadingRef.current = date
       readyRef.current = false
       const loaded = await loadDay(date)
+      loadingRef.current = null
       if (cancelled) return
       dayRef.current = loaded
       setDay(loaded)
@@ -98,10 +103,11 @@ export const useDayTracking = (adapter: ChatAdapter | null, intervalMs = 1000): 
       const at = Date.now()
       setNow(at)
 
-      // Virada do dia: recomeça na data local atual (e carrega o que outra aba já gravou nela).
-      const today = dayKey(new Date(at))
-      if (dayRef.current.date !== today) {
-        void load(today)
+      // Virada do dia: recomeça na data local atual (e carrega o que outra aba já gravou nela). O
+      // dia anterior continua no storage, intacto e consultável pelo relatório.
+      const rolled = rolloverDate(dayRef.current.date, at)
+      if (rolled) {
+        void load(rolled)
         return
       }
       if (!readyRef.current || !adapter) return
@@ -134,7 +140,9 @@ export const useDayTracking = (adapter: ChatAdapter | null, intervalMs = 1000): 
       const next = observeConversation(current, observation)
       dayRef.current = next
       setDay(next)
-      void saveDay(next)
+      // Gravação com merge: o dia inteiro é reescrito, então juntamos com o storage para o tick
+      // desta aba não apagar a conversa que outra aba gravou no meio do caminho.
+      void saveDayMerged(next)
     }
 
     tick()
@@ -142,6 +150,7 @@ export const useDayTracking = (adapter: ChatAdapter | null, intervalMs = 1000): 
     return () => {
       cancelled = true
       readyRef.current = false
+      loadingRef.current = null
       clearInterval(interval)
       unsubscribe()
     }

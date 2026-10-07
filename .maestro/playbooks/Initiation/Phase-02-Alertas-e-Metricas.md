@@ -79,10 +79,17 @@ final da fase, `pnpm test` e `pnpm typecheck` passam e o painel lateral exibe o 
 > - **Decisão:** o hook é chamado dentro do próprio `DayOverview` (não no `sidepanel.tsx`) para a seção ser autocontida e o painel não carregar estado de tracking quando não precisa. Duas instâncias do hook (widget no content script + painel) leem o mesmo storage e convergem pelo `onChanged`, sem coordenação extra.
 > - **Verificação:** `tsc --noEmit` → **exit 0** e `vitest run` → **162/162** (nenhum teste existente quebrado). Sem teste de componente, pelo mesmo critério dos checkboxes do hook/widget: a regra de negócio está coberta em `tests/tracking-summary.test.ts` e a infra não tem `@testing-library/react`.
 
-- [ ] Adicionar tratamento explícito de virada de dia e de abas múltiplas:
+- [x] Adicionar tratamento explícito de virada de dia e de abas múltiplas:
   - Quando `dayKey()` mudar durante a sessão (ex.: extensão aberta após a meia-noite), iniciar um novo `DayLog` sem descartar o anterior no storage e refletir isso no hook/widget.
   - Sincronizar as UIs via `subscribeDay` (`chrome.storage.onChanged`), garantindo que uma gravação feita em outra aba apareça no widget e no painel.
   - Não reescrever registros de dias anteriores; o dia antigo fica consultável para o relatório.
+
+> **Virada de dia e abas múltiplas explícitas (2026-10-07).** `src/lib/tracking/level.ts`, `src/lib/tracking/store.ts`, `src/hooks/useDayTracking.ts` + o bullet do widget e a linha do `pnpm test` no `README.md`.
+> - **Virada de dia nomeada e testável:** `rolloverDate(currentDate, at)` (novo, em `level.ts`) devolve a data local de `at` quando ela difere da data atual, senão `null`. O tick do hook não compara mais datas inline: ele chama `rolloverDate`, e quando o resultado existe recarrega o dia novo (`loadDay`) e retorna sem observar — o dia anterior **não é apagado** (cada dia mora na sua própria chave `drummond.dayLog.<data>`, e a virada nunca chama `clearDay`). `dayKey` continua com data LOCAL, então 23:59 segue no dia corrente e 00:01 cai no seguinte.
+> - **Leitura concorrente evitada:** `loadingRef` guarda a data em leitura, para os ticks que caem durante a virada (quando `now` já é do dia novo mas o `await loadDay` ainda não voltou) não dispararem uma segunda leitura da mesma data; o `readyRef` continua impedindo que o tick grave antes do dia carregar.
+> - **Merge entre abas:** `subscribeDay` já sincronizava a UI, mas cada aba reescrevia o `DayLog` inteiro a partir da própria memória — duas abas em conversas diferentes perdiam uma delas. O hook passou a gravar com `saveDayMerged(day)` (novo), que faz read-modify-write da chave daquela data aplicando `mergeDayLogs(stored, local)`: união das conversas, o registro de maior `lastSeenAt` vence na mesma conversa (levando `clientSince`/momentos para o estado mais recente), sinais de IA ficam com o `at` mais novo e contadores usam `max` para não duplicar.
+> - **Só a data do próprio dia:** `saveDayMerged` lê e grava exclusivamente `drummond.dayLog.<day.date>`, então dias anteriores continuam intactos e consultáveis pelo relatório (a próxima fase lê por data). `mergeDayLogs` é puro e nunca olha datas vizinhas.
+> - **Verificação:** `tsc --noEmit` → **exit 0** e `vitest run` → **170/170** (162 anteriores + 8 novos: 4 de `rolloverDate`, incluindo 23:59 nulo, 00:01 no dia seguinte, virada de ano e o primeiro segundo após a meia-noite; e 4 de `mergeDayLogs`, cobrindo união de conversas, versão mais recente vencendo, contadores sem regressão + revisão mais nova, e coaching preservado de um só lado).
 
 - [ ] Escrever testes que cubram a virada de dia e a sincronização de forma isolada:
   - Teste de `dayKey` com datas locais próximas da meia-noite (23:59 e 00:01) confirmando chaves distintas.

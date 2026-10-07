@@ -18,6 +18,17 @@ export const dayKey = (at: Date = new Date()): string => {
 }
 
 /**
+ * Data local para a qual o log deve apontar neste instante, ou `null` quando o dia não virou (a
+ * `currentDate` já é a data local de `at`). Deixa a virada de dia explícita: o hook chama isto a
+ * cada tick e, quando o resultado não é nulo, recarrega o dia da nova data sem tocar no anterior.
+ * Puro e com `at` injetado, para testar 23:59/00:01 sem depender do relógio global.
+ */
+export const rolloverDate = (currentDate: string, at: number): string | null => {
+  const today = dayKey(new Date(at))
+  return today === currentDate ? null : today
+}
+
+/**
  * Nível do semáforo para o tempo de espera: verde até 6 min, amarelo até 12, laranja até 18 e
  * vermelho acima disso.
  */

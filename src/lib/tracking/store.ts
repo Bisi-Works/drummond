@@ -154,7 +154,69 @@ export const saveDay = async (day: DayLog): Promise<void> => {
   }
 }
 
-/** Apaga o dia da data pedida (usado ao virar o dia ou para descartar um log corrompido). */
+/** Sinal de IA mais recente entre dois registros; `undefined` quando nenhum dos dois tem. */
+const latestOf = <T extends { at: number }>(a?: T, b?: T): T | undefined =>
+  !a ? b : !b ? a : b.at >= a.at ? b : a
+
+/**
+ * Funde dois registros da mesma conversa sem perder o que a outra aba viu. O mais recente
+ * (`lastSeenAt`) vence — inclusive `clientSince`/momentos, que refletem o estado atual da espera —
+ * e os sinais de IA são unidos pelo `at` mais novo. Contadores usam `max` em vez de soma: duas abas
+ * podem ter partido da mesma base, e somar duplicaria o número.
+ */
+const mergeConversation = (
+  a: TrackedConversation,
+  b: TrackedConversation
+): TrackedConversation => {
+  const winner = b.lastSeenAt >= a.lastSeenAt ? b : a
+  const loser = winner === a ? b : a
+  return {
+    ...loser,
+    ...winner,
+    messageCount: Math.max(a.messageCount, b.messageCount),
+    reviewCount: Math.max(a.reviewCount, b.reviewCount),
+    lastReview: latestOf(a.lastReview, b.lastReview),
+    lastCoaching: latestOf(a.lastCoaching, b.lastCoaching)
+  }
+}
+
+/**
+ * Junta dois logs do mesmo dia por conversa, mantendo `updatedAt` no maior. É o que evita que duas
+ * abas abertas em conversas diferentes se sobrescrevam ao gravar o dia inteiro: `subscribeDay`
+ * sincroniza a UI, e este merge protege o storage quando a gravação de uma chega depois da leitura
+ * da outra. Nunca olha para datas vizinhas — cada dia continua na sua própria chave.
+ */
+export const mergeDayLogs = (stored: DayLog, local: DayLog): DayLog => {
+  const conversations: Record<string, TrackedConversation> = { ...stored.conversations }
+  for (const [key, conversation] of Object.entries(local.conversations)) {
+    const previous = conversations[key]
+    conversations[key] = previous ? mergeConversation(previous, conversation) : conversation
+  }
+  return {
+    date: local.date,
+    conversations,
+    updatedAt: Math.max(stored.updatedAt, local.updatedAt)
+  }
+}
+
+/**
+ * Grava o dia preservando o que já está no storage (read-modify-write). O hook usa esta variante no
+ * lugar de `saveDay` para o tick de uma aba não apagar a conversa que a outra acabou de gravar.
+ * Também silencioso sem storage; nunca escreve em outra data que não a de `day`.
+ */
+export const saveDayMerged = async (day: DayLog): Promise<void> => {
+  const area = localArea()
+  if (!area) return
+  try {
+    const key = `${DAY_LOG_PREFIX}${day.date}`
+    const items = await area.get(key)
+    await area.set({ [key]: mergeDayLogs(toDayLog(items?.[key], day.date), day) })
+  } catch {
+    // Sem storage: o dia daquela aba segue só em memória.
+  }
+}
+
+/** Apaga o dia da data pedida (descarta um log corrompido; a virada de dia preserva o anterior). */
 export const clearDay = async (date: string = dayKey()): Promise<void> => {
   const area = localArea()
   if (!area) return
