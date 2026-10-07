@@ -14,6 +14,8 @@ import { PROMPT_VERSION } from "~lib/ai/prompts"
 import { registerBrandFont } from "~lib/brand-font"
 import { config as appConfig } from "~lib/config"
 import { GET_CONVERSATION, type GetConversationResponse } from "~lib/messages"
+import { reviewSignal } from "~lib/tracking/signals"
+import { recordReview } from "~lib/tracking/store"
 
 // Precisa listar os mesmos domínios que os `hosts` dos adapters (o Plasmo lê este objeto estaticamente).
 export const config: PlasmoCSConfig = {
@@ -95,6 +97,9 @@ const Companion = () => {
     const text = adapter.readDraft()
     if (!text.trim()) return
 
+    // Conversa da revisão no momento do clique: se o vendedor trocar de conversa antes da
+    // resposta, o sinal ainda é anexado à conversa certa.
+    const key = conversationKey
     const id = ++requestId.current
     setReview({ kind: "loading" })
     setApplyError(null)
@@ -109,6 +114,8 @@ const Companion = () => {
       response = failure("A extensão foi atualizada. Recarregue a página do Botconversa.")
     }
     if (id === requestId.current) setReview({ kind: "done", draft: text, response })
+    // A revisão já foi feita: só se anexa o que a extensão já produziu, sem chamada de IA nova.
+    if (response.ok && key) void recordReview(key, reviewSignal(response.data, Date.now()))
   }
 
   // Só fecha o card se o texto realmente entrou no campo; senão mantém a sugestão e explica.

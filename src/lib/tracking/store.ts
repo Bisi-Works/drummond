@@ -179,6 +179,31 @@ export const attachCoaching = (prev: DayLog, key: string, signal: TrackedCoachin
 }
 
 /**
+ * Anexa a revisão ao dia em que ela terminou. Atalho para quem só tem o sinal em mãos (o content
+ * script): carrega o dia, aplica `attachReview` e grava. Nunca lança — o tracking não pode
+ * interferir na revisão.
+ */
+export const recordReview = async (key: string, signal: TrackedReviewSignal): Promise<void> => {
+  try {
+    await saveDay(attachReview(await loadDay(dayKey(new Date(signal.at))), key, signal))
+  } catch {
+    // Sem storage ou dado corrompido: o sinal simplesmente não entra no dia.
+  }
+}
+
+/**
+ * Anexa o coaching ao dia em que ele terminou. Mesmo atalho de `recordReview`, para o painel
+ * lateral, que não tem o hook de tracking. Nunca lança.
+ */
+export const recordCoaching = async (key: string, signal: TrackedCoachingSignal): Promise<void> => {
+  try {
+    await saveDay(attachCoaching(await loadDay(dayKey(new Date(signal.at))), key, signal))
+  } catch {
+    // Sem storage ou dado corrompido: o sinal simplesmente não entra no dia.
+  }
+}
+
+/**
  * Avisa a cada gravação de dia no `chrome.storage.local`, inclusive feita por outra aba — é o que
  * mantém widget e painel coerentes. Devolve a função para cancelar a escuta.
  */

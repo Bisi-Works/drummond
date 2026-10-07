@@ -22,6 +22,8 @@ import {
   type CoachResponse,
   type GetConversationResponse
 } from "~lib/messages"
+import { coachingSignal } from "~lib/tracking/signals"
+import { recordCoaching } from "~lib/tracking/store"
 
 registerBrandFont()
 
@@ -78,7 +80,7 @@ const SidePanel = () => {
   const analyze = async () => {
     try {
       setState({ kind: "loading", step: "Lendo a conversa…" })
-      const { conversation } = await readActiveConversation()
+      const { conversation, conversationKey } = await readActiveConversation()
       if (conversation.length === 0) {
         throw new Error("A conversa aberta não tem mensagens visíveis para analisar.")
       }
@@ -91,6 +93,10 @@ const SidePanel = () => {
         )
       )
       setState({ kind: "done", messageCount, response })
+      // A análise já foi feita: só se anexa o sinal à conversa lida, sem chamada de IA nova.
+      if (response.ok && conversationKey) {
+        void recordCoaching(conversationKey, coachingSignal(response.data, Date.now()))
+      }
     } catch (error) {
       setState({ kind: "error", message: error instanceof Error ? error.message : String(error) })
     }
