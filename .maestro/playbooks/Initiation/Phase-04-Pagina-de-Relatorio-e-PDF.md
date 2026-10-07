@@ -9,7 +9,7 @@ página externa → PDF — funciona de ponta a ponta.
 
 ## Tasks
 
-- [ ] Criar `src/lib/report/storage.ts` para persistir e recuperar relatórios:
+- [x] Criar `src/lib/report/storage.ts` para persistir e recuperar relatórios:
   - Chaves `REPORT_STORAGE_PREFIX = "drummond.report."` (um por data) e `REPORT_LATEST_KEY = "drummond.report.latest"` com `{ date, generatedAt }`.
   - `saveReport(date, report)`, `loadReport(date)`, `listReportDates()`, `loadLatestReportRef()` com fallback silencioso quando `chrome?.storage` não existir, seguindo o padrão de `src/lib/tracking/store.ts`.
   - Tipo `StoredReport = { date: string; generatedAt: number; model: string; promptVersion: string; report: DailyReport; input: DailyReportInput }` — guardar também o input permite reabrir a página depois sem nova chamada de IA.
