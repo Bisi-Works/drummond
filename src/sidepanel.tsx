@@ -7,6 +7,7 @@ import type { ChatMessage } from "~adapters/types"
 import { Wordmark } from "~components/Brand"
 import { CoachingReport } from "~components/CoachingReport"
 import { CostPanel } from "~components/CostPanel"
+import { DayOverview } from "~components/DayOverview"
 import { MetaFooter } from "~components/MetaFooter"
 import { Spinner } from "~components/Spinner"
 import { ThemeToggle } from "~components/ThemeToggle"
@@ -133,6 +134,10 @@ const SidePanel = () => {
       </header>
 
       <div className="flex-1 space-y-4 px-4 py-4">
+        <DayOverview />
+
+        <hr className="border-line" />
+
         {state.kind === "idle" && (
           <p className="text-sm text-fg-muted">
             Abra uma conversa no Botconversa e clique em “Analisar conversa atual”. A análise considera

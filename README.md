@@ -23,6 +23,10 @@ cabeçalho do painel lateral troca para o claro, e a escolha vale também para o
   aguardando, respondidas) e a média até a primeira resposta. O registro é local
   (`chrome.storage.local`), sincroniza entre as abas e não faz nenhuma chamada de IA: revisões e
   coachings já feitos aparecem anexados à conversa.
+- **Resumo do dia no painel**: acima da análise, o painel lateral abre com os mesmos totais do
+  widget (acompanhadas, aguardando, respondidas, revisões, coachings e médias) e a fila de atenção
+  com chips coloridos e tempo de espera. Lê o mesmo `chrome.storage.local`, então widget e painel
+  ficam coerentes entre abas; sem conversas no dia, mostra "Nenhuma conversa acompanhada hoje".
 
 Stack: [Plasmo](https://docs.plasmo.com/) (React + TypeScript), Tailwind CSS 3 e OpenRouter.
 

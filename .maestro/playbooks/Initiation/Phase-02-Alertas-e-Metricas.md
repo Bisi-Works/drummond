@@ -67,10 +67,17 @@ final da fase, `pnpm test` e `pnpm typecheck` passam e o painel lateral exibe o 
 > - **Rodapé:** totais curtos (acompanhadas, aguardando, respondidas) e "1ª resposta em X" quando `summary.averageFirstResponseMs` existe. `formatDuration` cobre segundos/minutos/horas e `formatWait` foi reduzido a chamá-lo, devolvendo "agora" abaixo de 1 min (sem duplicar a formatação). O rodapé só aparece com conversas no dia e some ao minimizar — arrastar/minimizar e o tema seguem intactos.
 > - **Sem teste de componente:** a infra não tem `@testing-library/react` e a regra de negócio (`summarizeDay`/`attentionQueue`) já está coberta em `tests/tracking-summary.test.ts`; mesmo critério do checkbox do hook. `tsc --noEmit` → **exit 0** e `vitest run` → **162/162** (nada quebrado).
 
-- [ ] Adicionar um resumo do dia no `src/sidepanel.tsx`:
+- [x] Adicionar um resumo do dia no `src/sidepanel.tsx`:
   - Incluir uma seção "Resumo do dia" (componente novo `src/components/DayOverview.tsx`) acima ou abaixo da análise de coaching, com os totais de `summarizeDay` e a lista `attention` com chips coloridos e tempo de espera.
   - Consumir os mesmos dados do widget via `useDayTracking` (a fonte é o `chrome.storage`, então as duas UIs ficam coerentes automaticamente).
   - Tratar o estado vazio ("Nenhuma conversa acompanhada hoje") e manter o fluxo atual de coaching intacto.
+
+> **Resumo do dia no painel lateral (2026-10-07).** `src/components/DayOverview.tsx` (novo), `src/sidepanel.tsx`, `src/lib/tracking/format.ts` (novo), `src/lib/labels.ts`, `src/components/DayWidget.tsx` e o bullet do painel no `README.md`.
+> - **Componente:** `DayOverview` não recebe props — chama `useDayTracking(null)` (o painel não observa a página, só lê `chrome.storage.local`, e o hook já assina `subscribeDay` + tick de 1 s para os tempos de espera seguirem vivos). Renderiza: badge de `alertCount` + data no cabeçalho; grade de três `Stat` (acompanhadas/aguardando/respondidas); linha de revisões/coachings e médias (1ª resposta e resposta) só quando existem; e a fila `attention` com `WAIT_CHIP` + `formatWait`. Estado vazio ("Nenhuma conversa acompanhada hoje") numa borda tracejada; com conversas e sem fila, "Nenhuma conversa aguardando resposta."
+> - **Fluxo de coaching intacto:** o painel só ganhou `<DayOverview />` + um `<hr>` no topo do corpo; todos os estados (`idle`/`loading`/`streaming`/`error`/`done`), o streaming e o rodapé seguem iguais.
+> - **Sem duplicação:** `formatDuration`/`formatWait`/`formatDayLabel` saíram do `DayWidget.tsx` para `src/lib/tracking/format.ts`, e `WAIT_CHIP`/`WAIT_ROW` para `src/lib/labels.ts` (mesmo lugar dos outros vocabulários visuais, como `IMPACT_STYLE` e `BANT_STATUS_STYLE`). Widget e painel agora compartilham os dois.
+> - **Decisão:** o hook é chamado dentro do próprio `DayOverview` (não no `sidepanel.tsx`) para a seção ser autocontida e o painel não carregar estado de tracking quando não precisa. Duas instâncias do hook (widget no content script + painel) leem o mesmo storage e convergem pelo `onChanged`, sem coordenação extra.
+> - **Verificação:** `tsc --noEmit` → **exit 0** e `vitest run` → **162/162** (nenhum teste existente quebrado). Sem teste de componente, pelo mesmo critério dos checkboxes do hook/widget: a regra de negócio está coberta em `tests/tracking-summary.test.ts` e a infra não tem `@testing-library/react`.
 
 - [ ] Adicionar tratamento explícito de virada de dia e de abas múltiplas:
   - Quando `dayKey()` mudar durante a sessão (ex.: extensão aberta após a meia-noite), iniciar um novo `DayLog` sem descartar o anterior no storage e refletir isso no hook/widget.

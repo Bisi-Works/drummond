@@ -9,6 +9,8 @@ import {
 import type { ChatAdapter } from "~adapters/types"
 import { Wordmark } from "~components/Brand"
 import { useDayTracking } from "~hooks/useDayTracking"
+import { WAIT_CHIP, WAIT_ROW } from "~lib/labels"
+import { formatDayLabel, formatDuration, formatWait } from "~lib/tracking/format"
 import { waitElapsed, waitLevel } from "~lib/tracking/level"
 import {
   DEFAULT_WIDGET_POSITION,
@@ -16,7 +18,7 @@ import {
   saveWidgetPosition,
   type WidgetPosition
 } from "~lib/tracking/store"
-import type { TrackedConversation, WaitLevel } from "~lib/tracking/types"
+import type { TrackedConversation } from "~lib/tracking/types"
 
 // Widget flutuante do protótipo: lista as conversas acompanhadas hoje e pinta o tempo de espera
 // desde a última mensagem do cliente. É injetado no shadow DOM pelo content script (companion.tsx)
@@ -25,44 +27,7 @@ import type { TrackedConversation, WaitLevel } from "~lib/tracking/types"
 const CARD_WIDTH = 300
 const HEADER_HEIGHT = 44
 
-/** Cores do chip de espera, no claro e no escuro (mesmo vocabulário do SuggestionCard). */
-const WAIT_CHIP: Record<WaitLevel, string> = {
-  verde: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300",
-  amarelo: "bg-amber-100 text-amber-900 dark:bg-amber-400/15 dark:text-amber-200",
-  laranja: "bg-orange-100 text-orange-900 dark:bg-orange-500/15 dark:text-orange-200",
-  vermelho: "bg-rose-100 text-rose-800 dark:bg-rose-500/15 dark:text-rose-200"
-}
-
-/** Contorno da linha que precisa de ação (mesmo semáforo do chip, em `ring` para não brigar com a borda base). */
-const WAIT_ROW: Record<WaitLevel, string> = {
-  verde: "ring-emerald-400/70 dark:ring-emerald-500/40",
-  amarelo: "ring-amber-400/70 dark:ring-amber-400/40",
-  laranja: "ring-orange-400/80 dark:ring-orange-500/50",
-  vermelho: "ring-rose-500/80 dark:ring-rose-500/60"
-}
-
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
-
-/** Duração em texto curto: "45 s", "5 min", "1 h 5 min". */
-const formatDuration = (elapsedMs: number): string => {
-  const seconds = Math.max(0, Math.round(elapsedMs / 1000))
-  if (seconds < 60) return `${seconds} s`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes} min`
-  const hours = Math.floor(minutes / 60)
-  const rest = minutes % 60
-  return rest ? `${hours} h ${rest} min` : `${hours} h`
-}
-
-/** Tempo de espera em texto curto: "agora" abaixo de um minuto, senão igual a `formatDuration`. */
-const formatWait = (elapsedMs: number): string =>
-  elapsedMs < 60_000 ? "agora" : formatDuration(elapsedMs)
-
-/** Data local YYYY-MM-DD em "DD/MM/AAAA" (sem `Date` para não escorregar de fuso). */
-const formatDayLabel = (date: string): string => {
-  const [year, month, day] = date.split("-")
-  return year && month && day ? `${day}/${month}/${year}` : date
-}
 
 /** Estado neutro de quem não está aguardando resposta. */
 const idleLabel = (conversation: TrackedConversation): string =>
