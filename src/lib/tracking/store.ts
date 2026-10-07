@@ -1,0 +1,247 @@
+import type { ChatAuthor } from "~adapters/types"
+
+import { DAY_LOG_PREFIX, WIDGET_POSITION_KEY, WIDGET_POSITION_VERSION } from "./constants"
+import { dayKey } from "./level"
+import type {
+  DayLog,
+  TrackedCoachingSignal,
+  TrackedConversation,
+  TrackedReviewSignal
+} from "./types"
+
+// Persistência e redutores puros do dia de trabalho. O `chrome.storage.local` guarda um `DayLog`
+// por data; os redutores (`observeConversation`, `attachReview`, `attachCoaching`) não tocam no
+// storage nem no relógio global — quem chama injeta `now` — para serem testáveis sem navegador.
+
+/** Observação de uma conversa aberta, derivada pelo adapter a cada tick do hook. */
+export interface ConversationObservation {
+  /** `getConversationKey()` do adapter (ex.: o `chat_id` da URL). */
+  key: string
+  /** `id` do adapter que atendeu a plataforma (ex.: "botconversa"). */
+  platform: string
+  /** Rótulo curto; quando vazio, o redutor cai para a própria `key`. */
+  label: string
+  /** Autor da última mensagem observada; `null` quando a conversa ainda não tem mensagens. */
+  author: ChatAuthor | null
+  text: string
+  /** Total de mensagens visíveis na conversa (nunca regride dentro do dia). */
+  messageCount: number
+  /** Instante da observação (epoch ms), injetado para o redutor ser puro. */
+  now: number
+}
+
+/** Posição do widget flutuante, para ele voltar onde o vendedor o deixou. */
+export interface WidgetPosition {
+  top: number
+  /** Distância da borda direita — a posição ancorada padrão; some depois que o widget é arrastado. */
+  right?: number
+  /** Distância da borda esquerda quando o vendedor arrastou o widget para outra posição. */
+  left?: number
+  minimized: boolean
+}
+
+/** Posição inicial: junto à navbar do Botconversa (topo à direita), aberta. */
+export const DEFAULT_WIDGET_POSITION: WidgetPosition = { top: 64, right: 16, minimized: false }
+
+/** Notificado a cada gravação de um dia em `chrome.storage.local` (inclusive de outra aba). */
+export type DayChangeListener = (day: DayLog, date: string) => void
+
+/**
+ * `chrome.storage.local` quando existe; `null` quando a extensão foi recarregada com a página
+ * aberta (o content script continua rodando, mas perde o `chrome.storage`). Quem chama trata o
+ * `null` como "sem storage" e segue com um dia vazio.
+ */
+const localArea = (): chrome.storage.LocalStorageArea | null => {
+  try {
+    return typeof chrome !== "undefined" ? (chrome.storage?.local ?? null) : null
+  } catch {
+    return null
+  }
+}
+
+/** Dia vazio (nada registrado ainda); `updatedAt: 0` marca "sem gravação". */
+export const emptyDay = (date: string): DayLog => ({ date, conversations: {}, updatedAt: 0 })
+
+/** Registro mínimo de uma conversa que ainda não foi observada (ex.: sinais de IA antes do tick). */
+const minimalConversation = (key: string, now: number): TrackedConversation => ({
+  key,
+  platform: "",
+  label: key,
+  openedAt: now,
+  lastSeenAt: now,
+  lastMessageAuthor: null,
+  lastMessageText: "",
+  lastMessageAt: null,
+  clientSince: null,
+  messageCount: 0,
+  reviewCount: 0
+})
+
+/** Valida o que veio do storage; qualquer valor estranho vira um dia vazio. */
+export const toDayLog = (value: unknown, date: string): DayLog => {
+  if (!value || typeof value !== "object") return emptyDay(date)
+  const stored = value as Partial<DayLog>
+  const conversations = stored.conversations
+  if (!conversations || typeof conversations !== "object") return emptyDay(date)
+  return {
+    date,
+    conversations: conversations as Record<string, TrackedConversation>,
+    updatedAt: typeof stored.updatedAt === "number" ? stored.updatedAt : 0
+  }
+}
+
+/** Lê o dia da data pedida (local); sem storage ou com leitura falha, devolve um dia vazio. */
+export const loadDay = async (date: string = dayKey()): Promise<DayLog> => {
+  const area = localArea()
+  if (!area) return emptyDay(date)
+  try {
+    const items = await area.get(`${DAY_LOG_PREFIX}${date}`)
+    return toDayLog(items?.[`${DAY_LOG_PREFIX}${date}`], date)
+  } catch {
+    return emptyDay(date)
+  }
+}
+
+/** Grava o dia inteiro na chave da sua data; silencioso quando não há storage. */
+export const saveDay = async (day: DayLog): Promise<void> => {
+  const area = localArea()
+  if (!area) return
+  try {
+    await area.set({ [`${DAY_LOG_PREFIX}${day.date}`]: day })
+  } catch {
+    // Sem storage (extensão recarregada): o dia daquela aba segue só em memória.
+  }
+}
+
+/** Apaga o dia da data pedida (usado ao virar o dia ou para descartar um log corrompido). */
+export const clearDay = async (date: string = dayKey()): Promise<void> => {
+  const area = localArea()
+  if (!area) return
+  try {
+    await area.remove(`${DAY_LOG_PREFIX}${date}`)
+  } catch {
+    // Sem storage: não há nada persistido para apagar.
+  }
+}
+
+/**
+ * Upsert da conversa observada agora. Atualiza rótulo, plataforma, última mensagem e contagem de
+ * mensagens, sem nunca regredir `openedAt`.
+ *
+ * O `time` do adapter vem como "<dia> HH:MM" (às vezes com o dia escrito) e **não tem data**, então
+ * não dá para reconstruir o instante da mensagem. Por isso a espera se apoia em `clientSince`: ele
+ * é gravado na primeira vez que a última mensagem do cliente é vista e zerado quando o vendedor
+ * responde (aí a conversa não está mais aguardando).
+ */
+export const observeConversation = (prev: DayLog, input: ConversationObservation): DayLog => {
+  const { key, now, author } = input
+  const existing = prev.conversations[key]
+  const base = existing ?? minimalConversation(key, now)
+
+  const clientSince =
+    author === "vendedor" ? null : author === "cliente" ? (base.clientSince ?? now) : base.clientSince
+
+  const conversation: TrackedConversation = {
+    ...base,
+    platform: input.platform || base.platform,
+    label: input.label || base.label,
+    openedAt: base.openedAt,
+    lastSeenAt: now,
+    lastMessageAuthor: author,
+    lastMessageText: input.text,
+    lastMessageAt: author ? now : base.lastMessageAt,
+    clientSince,
+    messageCount: Math.max(base.messageCount, input.messageCount)
+  }
+
+  return { ...prev, conversations: { ...prev.conversations, [key]: conversation }, updatedAt: now }
+}
+
+/** Anexa a última revisão de rascunho à conversa e conta mais uma revisão do dia. */
+export const attachReview = (prev: DayLog, key: string, signal: TrackedReviewSignal): DayLog => {
+  const existing = prev.conversations[key] ?? minimalConversation(key, signal.at)
+  const conversation: TrackedConversation = {
+    ...existing,
+    lastReview: signal,
+    reviewCount: existing.reviewCount + 1
+  }
+  return { ...prev, conversations: { ...prev.conversations, [key]: conversation }, updatedAt: signal.at }
+}
+
+/**
+ * Anexa o último coaching à conversa. Não incrementa `reviewCount`, que conta revisões de rascunho
+ * (ver `types.ts`) — coaching e revisão são sinais diferentes.
+ */
+export const attachCoaching = (prev: DayLog, key: string, signal: TrackedCoachingSignal): DayLog => {
+  const existing = prev.conversations[key] ?? minimalConversation(key, signal.at)
+  const conversation: TrackedConversation = { ...existing, lastCoaching: signal }
+  return { ...prev, conversations: { ...prev.conversations, [key]: conversation }, updatedAt: signal.at }
+}
+
+/**
+ * Avisa a cada gravação de dia no `chrome.storage.local`, inclusive feita por outra aba — é o que
+ * mantém widget e painel coerentes. Devolve a função para cancelar a escuta.
+ */
+export const subscribeDay = (onChange: DayChangeListener): (() => void) => {
+  let onChanged: typeof chrome.storage.onChanged | null = null
+  try {
+    onChanged = typeof chrome !== "undefined" ? (chrome.storage?.onChanged ?? null) : null
+  } catch {
+    onChanged = null
+  }
+  if (!onChanged) return () => {}
+
+  const listener = (
+    changes: { [key: string]: chrome.storage.StorageChange },
+    areaName: chrome.storage.AreaName
+  ) => {
+    if (areaName !== "local") return
+    for (const [key, change] of Object.entries(changes)) {
+      if (!key.startsWith(DAY_LOG_PREFIX)) continue
+      const date = key.slice(DAY_LOG_PREFIX.length)
+      onChange(toDayLog(change.newValue, date), date)
+    }
+  }
+
+  onChanged.addListener(listener)
+  return () => onChanged.removeListener(listener)
+}
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value)
+
+/** Valida a posição salva; valor ausente, de outra versão ou corrompido cai na posição padrão. */
+export const toWidgetPosition = (value: unknown): WidgetPosition => {
+  if (!value || typeof value !== "object") return DEFAULT_WIDGET_POSITION
+  const stored = value as Partial<WidgetPosition> & { version?: unknown }
+  if (stored.version !== WIDGET_POSITION_VERSION || !isFiniteNumber(stored.top)) {
+    return DEFAULT_WIDGET_POSITION
+  }
+  const position: WidgetPosition = { top: stored.top, minimized: stored.minimized === true }
+  if (isFiniteNumber(stored.right)) position.right = stored.right
+  if (isFiniteNumber(stored.left)) position.left = stored.left
+  return position
+}
+
+/** Posição salva do widget; sem storage ou com dados ruins, devolve a posição padrão. */
+export const loadWidgetPosition = async (): Promise<WidgetPosition> => {
+  const area = localArea()
+  if (!area) return DEFAULT_WIDGET_POSITION
+  try {
+    const items = await area.get(WIDGET_POSITION_KEY)
+    return toWidgetPosition(items?.[WIDGET_POSITION_KEY])
+  } catch {
+    return DEFAULT_WIDGET_POSITION
+  }
+}
+
+/** Grava a posição do widget com a versão do formato, para permitir migração depois. */
+export const saveWidgetPosition = async (position: WidgetPosition): Promise<void> => {
+  const area = localArea()
+  if (!area) return
+  try {
+    await area.set({ [WIDGET_POSITION_KEY]: { version: WIDGET_POSITION_VERSION, ...position } })
+  } catch {
+    // Sem storage: o widget volta à posição padrão na próxima abertura.
+  }
+}
