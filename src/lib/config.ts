@@ -84,9 +84,20 @@ const coach: ModelConfig = {
   timeoutMs: 90_000
 }
 
+/** Relatório diário: roda uma vez por dia, então pode ser mais caro e demorar mais que a revisão. */
+const report: ModelConfig = {
+  model: process.env.PLASMO_PUBLIC_REPORT_MODEL || "deepseek/deepseek-v4-flash-0731",
+  temperature: toNumber(process.env.PLASMO_PUBLIC_REPORT_TEMPERATURE ?? "0.3"),
+  reasoning: toReasoning(process.env.PLASMO_PUBLIC_REPORT_REASONING ?? "off"),
+  responseFormat: toResponseFormatMode(process.env.PLASMO_PUBLIC_REPORT_RESPONSE_FORMAT ?? "json_schema"),
+  providerOrder: toProviderOrder(process.env.PLASMO_PUBLIC_REPORT_PROVIDER_ORDER ?? "cohere,parasail"),
+  timeoutMs: 90_000
+}
+
 export const config = {
   review,
   coach,
+  report,
   contextMessages: toNumber(process.env.PLASMO_PUBLIC_CONTEXT_MESSAGES) ?? 20,
   /** O coaching olha a conversa inteira carregada na tela, até este limite. */
   coachMessages: 80,

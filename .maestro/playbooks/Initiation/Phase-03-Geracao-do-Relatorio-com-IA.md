@@ -10,9 +10,13 @@ passam.
 
 ## Tasks
 
-- [ ] Adicionar a tarefa de modelo do relatório em `src/lib/config.ts`, seguindo exatamente o formato das tarefas `review` e `coach`:
+- [x] Adicionar a tarefa de modelo do relatório em `src/lib/config.ts`, seguindo exatamente o formato das tarefas `review` e `coach`:
   - `const report: ModelConfig` com `model: process.env.PLASMO_PUBLIC_REPORT_MODEL || "deepseek/deepseek-v4-flash-0731"`, `temperature: toNumber(process.env.PLASMO_PUBLIC_REPORT_TEMPERATURE ?? "0.3")`, `reasoning: toReasoning(process.env.PLASMO_PUBLIC_REPORT_REASONING ?? "off")`, `responseFormat: toResponseFormatMode(process.env.PLASMO_PUBLIC_REPORT_RESPONSE_FORMAT ?? "json_schema")`, `providerOrder: toProviderOrder(process.env.PLASMO_PUBLIC_REPORT_PROVIDER_ORDER ?? "cohere,parasail")` e `timeoutMs: 90_000`.
   - Incluir `report` no objeto `config` exportado e documentar as novas variáveis em `.env.example` (mesmo bloco comentado das outras tarefas), deixando claro que o relatório roda uma vez por dia e por isso pode ser mais caro que a revisão.
+
+> **Tarefa de modelo do relatório adicionada (2026-10-07).** `const report: ModelConfig` em `src/lib/config.ts`, logo depois de `coach`, com o mesmo formato e os parâmetros pedidos: `deepseek/deepseek-v4-flash-0731`, `temperature` 0.3, `reasoning` off, `responseFormat` json_schema, `providerOrder` `cohere,parasail` e `timeoutMs: 90_000` (mesmo teto do coaching, já que o relatório também gera ~1000+ tokens). Cada variável lê o seu `process.env.PLASMO_PUBLIC_REPORT_*` com o padrão no fallback, como `review` e `coach`. `report` entrou no objeto `config` exportado ao lado de `review`/`coach`.
+> No `.env.example`, um bloco novo comentado logo após o do coaching, com as cinco variáveis `PLASMO_PUBLIC_REPORT_*` e a nota de que o relatório roda **uma vez por dia** sobre o resumo do tracking, por isso pode ser mais caro que a revisão (que roda a cada mensagem).
+> **Verificação:** `./node_modules/.bin/tsc --noEmit` → **exit 0** e `./node_modules/.bin/vitest run` → **182/182** (nenhuma asserção alterada).
 
 - [ ] Definir o schema e os limites do relatório:
   - Em `src/lib/ai/constants.ts`, adicionar `MAX_REPORT_ITEMS = 5` e `reportSections = ["acertos", "erros", "melhorias", "pendencias"] as const` (se útil para UI/testes), sem quebrar as constantes existentes.
