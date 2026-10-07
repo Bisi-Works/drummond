@@ -1,0 +1,10 @@
+# Dependências nativas do Plasmo/Parcel que precisam rodar build scripts na instalação.
+allowBuilds:
+  '@parcel/watcher': true
+  '@swc/core': true
+  esbuild: true
+  lmdb: true
+  msgpackr-extract: true
+  sharp: true
+minimumReleaseAgeExclude:
+  - '@types/chrome@0.3.4'

@@ -1,0 +1,16 @@
+# dependências
+node_modules/
+
+# saída do Plasmo
+build/
+.plasmo/
+
+# segredos — a chave do OpenRouter fica aqui
+.env
+.env.*.local
+
+# misc
+.DS_Store
+*.log
+*.tsbuildinfo
+coverage/

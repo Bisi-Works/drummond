@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Neutros de cada tema (cores surface, muted, line e fg no tailwind.config.js). O escuro é o padrão
+ * e vem da classe `dark` na raiz de cada interface (ver src/hooks/useTheme.ts). No content script,
+ * `:root` vira `:host(plasmo-csui)` (ver getStyle em companion.tsx). Os valores escuros são os do
+ * bisi.works: fundo #000, cartões #09090b, bordas brancas translúcidas.
+ */
+@layer base {
+  :root {
+    --surface: #ffffff;
+    --muted: #f3f4f6;
+    --line: #e5e7eb;
+    --line-strong: #d1d5db;
+    --fg: #111827;
+    --fg-muted: #4b5563;
+    --fg-subtle: #6b7280;
+  }
+
+  .dark {
+    --surface: #09090b;
+    --muted: #1f2937;
+    --line: #ffffff24;
+    --line-strong: #ffffff40;
+    --fg: #f9fafb;
+    --fg-muted: #d1d5db;
+    --fg-subtle: #9ca3af;
+    color-scheme: dark;
+  }
+}

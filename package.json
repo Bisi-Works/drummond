@@ -1,0 +1,46 @@
+{
+  "name": "drummond-by-bw",
+  "displayName": "Drummond by BW",
+  "version": "0.1.0",
+  "description": "Revisão e coaching de mensagens de vendas no Botconversa com IA (uso interno).",
+  "author": "BW <bw@bisi.works>",
+  "private": true,
+  "scripts": {
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "package": "plasmo package",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "check:bundle": "node scripts/check-bundle.mjs",
+    "verify": "pnpm test && pnpm typecheck && pnpm build && pnpm check:bundle"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist": "5.3.0",
+    "@plasmohq/messaging": "0.7.2",
+    "plasmo": "0.90.5",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.3.4",
+    "@types/node": "24.x",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "autoprefixer": "10.6.1",
+    "happy-dom": "20.14.5",
+    "postcss": "8.5.28",
+    "tailwindcss": "3.4.19",
+    "typescript": "5.9.3",
+    "vitest": "5.0.2"
+  },
+  "manifest": {
+    "permissions": [
+      "storage"
+    ],
+    "host_permissions": [
+      "https://openrouter.ai/*"
+    ]
+  }
+}
