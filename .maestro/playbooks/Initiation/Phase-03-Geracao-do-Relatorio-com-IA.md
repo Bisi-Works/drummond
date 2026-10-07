@@ -18,10 +18,15 @@ passam.
 > No `.env.example`, um bloco novo comentado logo após o do coaching, com as cinco variáveis `PLASMO_PUBLIC_REPORT_*` e a nota de que o relatório roda **uma vez por dia** sobre o resumo do tracking, por isso pode ser mais caro que a revisão (que roda a cada mensagem).
 > **Verificação:** `./node_modules/.bin/tsc --noEmit` → **exit 0** e `./node_modules/.bin/vitest run` → **182/182** (nenhuma asserção alterada).
 
-- [ ] Definir o schema e os limites do relatório:
+- [x] Definir o schema e os limites do relatório:
   - Em `src/lib/ai/constants.ts`, adicionar `MAX_REPORT_ITEMS = 5` e `reportSections = ["acertos", "erros", "melhorias", "pendencias"] as const` (se útil para UI/testes), sem quebrar as constantes existentes.
   - Em `src/lib/ai/schemas.ts`, criar `dailyReportSchema` com `z.object`: `resumo` (string, 1–2 frases sobre o dia), `acertos: z.array(z.string())`, `erros: z.array(z.string())`, `melhorias: z.array(z.string())`, `pendencias: z.array(z.string())` descrevendo em cada campo o que deve conter (ex.: pendências = o que ficou em aberto para amanhã, por conversa). Sem `.max`/`.min` no schema (mesma ressalva do comentário do arquivo sobre `strict`).
   - Exportar `type DailyReport = z.infer<typeof dailyReportSchema>` e `limitDailyReport(report)` truncando cada lista em `MAX_REPORT_ITEMS` (aplicado depois do parse, como `limitReview`/`limitCoaching`).
+
+> **Schema e limites do relatório definidos (2026-10-07).** Em `src/lib/ai/constants.ts`, `MAX_REPORT_ITEMS = 5` com um comentário explicando a razão (relatório roda uma vez por dia sobre o resumo; listas curtas mantêm widget/painel e custo previsíveis), mais `reportSections = ["acertos", "erros", "melhorias", "pendencias"] as const` e o tipo `ReportSection` derivado. As constantes existentes de revisão/coaching ficaram intactas.
+> Em `src/lib/ai/schemas.ts`, `dailyReportSchema` com `resumo` (string, 1–2 frases) e as quatro listas de strings, cada campo com um `.describe` dizendo o que deve conter — `pendencias` explicitamente "o que ficou em aberto para amanhã, por conversa". Nenhum `.max`/`.min` (a mesma ressalva do topo do arquivo sobre provedores em modo strict), então o truncamento acontece depois do parse. Exportados `type DailyReport = z.infer<typeof dailyReportSchema>` e `limitDailyReport`, que fatia as quatro listas em `MAX_REPORT_ITEMS` preservando a ordem e usando o mesmo formato de `limitReview`/`limitCoaching`.
+> Os testes do motor (`limitDailyReport`, `buildReportInput`, `formatReportInput`, schema e `generateDailyReport`) ficam na tarefa própria de `tests/daily-report.test.ts`, para não duplicar cobertura.
+> **Verificação:** `./node_modules/.bin/tsc --noEmit` → **exit 0** e `./node_modules/.bin/vitest run` → **182/182** (13 arquivos, nenhuma asserção alterada).
 
 - [ ] Criar `src/lib/tracking/report.ts` com o payload compacto que vai para a IA, mantendo o custo sob controle:
   - `buildReportInput(day: DayLog, now): DailyReportInput` com um objeto serializável contendo: `date`, totais de `summarizeDay`, e uma lista por conversa com `label`, `platform`, última mensagem do cliente (texto truncado, ex.: 200 caracteres), tempo de espera/level, se foi respondida e os sinais já anexados (`lastReview`, `lastCoaching`) — nunca a conversa completa.
