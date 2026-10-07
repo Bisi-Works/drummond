@@ -66,10 +66,14 @@ página externa → PDF — funciona de ponta a ponta.
 >
 > **Confirmação automatizada:** `scripts/check-bundle.mjs` ganhou uma checagem que entrega `{ name: "generate-report", body: { report } }` aos listeners do service worker de produção (o mesmo caminho de `sendToBackground` do widget) com um relatório diário falso, provando que a rota responde com um `DailyReport` validado; o teste do content script agora também confere que o bundle referencia `generate-report`/`open-report`. `corepack pnpm build` + `corepack pnpm check:bundle` → **23/23 OK**, com “chave só no background”, “generate-report responde (ok)” e “content script referencia as rotas generate-report/open-report” verdes (build de fumaça com `.env` temporário só com `PLASMO_PUBLIC_OPENROUTER_API_KEY`, removido em seguida, como nas tarefas anteriores).
 
-- [ ] Escrever `tests/report-format.test.ts`:
+- [x] Escrever `tests/report-format.test.ts`:
   - `formatDuration` e `formatDayLabel` nos casos comuns e nos extremos (0 ms, 59 s, mais de 1 h).
   - `escapeHtml` neutralizando `<`, `>`, `&` e aspas.
   - `buildStandaloneHtml` contendo as seções e os textos do relatório e escapando um texto malicioso (`<script>`) sem vazá-lo como markup.
   - `reportFileName` estável para uma data fixa.
+
+> **Teste entregue (2026-10-07).** `tests/report-format.test.ts` cobre os helpers puros de `src/lib/report/format.ts` sem `chrome`, React ou rede: `formatDuration` nos limites (0 ms, 45 s, 59 s, 1 min, 3 599 s, hora cheia `1 h`, com resto `1 h 05`, 2 h, e duração negativa virando `0 s`), `formatDayLabel` (conversão e fallback para entrada fora do formato), `escapeHtml` com os cinco caracteres (`&`, `<`, `>`, aspas duplas e simples) e `reportFileName` estável para `2026-10-02`. `buildStandaloneHtml` é verificado pela presença das seções (`Resumo geral`, `Acertos`, `Erros / padrões a evitar`, `Melhorias`, `Pendências para amanhã`, `Métricas do dia`), do resumo, dos itens e das métricas (incluindo o travessão quando `averageResponseMs` é nulo), pelo escape de um payload `<script>`/`<img onerror>` que não pode chegar como markup, e pelo estado vazio `Nenhum item registrado.` quando a lista não tem itens.
+>
+> **Verificação:** `corepack pnpm test` → **232/232** (11 novos); `corepack pnpm typecheck` → exit 0. A checagem de `pnpm build`/`pnpm check:bundle` fica para a próxima tarefa, que já é a validação final da fase.
 
 - [ ] Rodar `pnpm test`, `pnpm typecheck` e `pnpm build`, corrigindo as falhas; em seguida rodar `pnpm check:bundle` para garantir que a nova tab e o novo handler não quebram a build de produção (o Plasmo pode descartar código no tree-shaking, como o README alerta).
