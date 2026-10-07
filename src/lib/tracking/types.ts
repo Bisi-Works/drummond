@@ -51,6 +51,19 @@ export interface TrackedConversation {
    * cliente.
    */
   clientSince: number | null
+  /**
+   * Instante da primeira resposta do vendedor no ciclo aberto pela última mensagem do cliente, em
+   * epoch ms; `null` enquanto o vendedor ainda não respondeu a esse ciclo. Uma nova mensagem do
+   * cliente reabre o ciclo e zera o campo — só a primeira resposta de cada ciclo o grava.
+   *
+   * Dia gravado antes da Fase 02 não tem o campo no storage; `loadDay`/`toDayLog` normalizam a
+   * leitura para `null`, então o código consumidor não precisa checar a ausência.
+   */
+  firstResponseAt: number | null
+  /** Instante da última mensagem do cliente vista hoje; `null` se nenhuma foi observada. */
+  lastClientAt: number | null
+  /** Instante da última mensagem do vendedor vista hoje; `null` se nenhuma foi observada. */
+  lastSellerAt: number | null
   /** Total de mensagens vistas na conversa ao longo do dia. */
   messageCount: number
   /** Revisões de rascunho feitas nesta conversa hoje (incrementado por `attachReview`). */

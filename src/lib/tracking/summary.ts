@@ -47,28 +47,15 @@ export interface AttentionItem {
 }
 
 /**
- * Momentos que o store grava em `TrackedConversation` na Fase 02: instante da primeira resposta do
- * vendedor depois da mensagem do cliente e o último momento em que cada autor falou. Ficam
- * opcionais aqui porque um dia gravado antes disso (ou um registro parcial) não os tem — nesse caso
- * a conversa simplesmente não conta na média, em vez de render um número inventado.
+ * Número finito ou `null`: protege as médias de um registro corrompido (`undefined`, `NaN`). Os
+ * momentos de resposta já entram normalizados por `toDayLog`, então o caso comum é `number | null`.
  */
-export interface ConversationMoments {
-  firstResponseAt?: number | null
-  lastClientAt?: number | null
-  lastSellerAt?: number | null
-}
-
-/** Número finito ou `null`: protege as médias de registro parcial (`undefined`, `NaN`). */
 const at = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null
 
 /** Distância entre dois instantes, nunca negativa (o relógio pode andar para trás). */
 const span = (from: number | null, to: number | null): number | null =>
   from === null || to === null ? null : Math.max(0, to - from)
-
-/** Lê os momentos opcionais sem exigir que o dia inteiro já os tenha. */
-const momentsOf = (conversation: TrackedConversation): ConversationMoments =>
-  conversation as TrackedConversation & ConversationMoments
 
 /** Conversas do dia; a ordem do objeto não importa para nenhuma agregação daqui. */
 const conversationList = (day: DayLog): TrackedConversation[] => Object.values(day.conversations)
@@ -111,20 +98,18 @@ const observedResponseMs = (conversation: TrackedConversation): number | null =>
  * que abriu o ciclo (`lastClientAt`, com `openedAt` de reserva); sem eles, cai na janela observada.
  */
 export const firstResponseMs = (conversation: TrackedConversation): number | null => {
-  const { firstResponseAt, lastClientAt } = momentsOf(conversation)
-  const respondedAt = at(firstResponseAt)
+  const respondedAt = at(conversation.firstResponseAt)
   if (respondedAt === null) return observedResponseMs(conversation)
-  return span(at(lastClientAt) ?? at(conversation.openedAt), respondedAt)
+  return span(at(conversation.lastClientAt) ?? at(conversation.openedAt), respondedAt)
 }
 
 /**
  * Tempo da resposta mais recente: da última mensagem do cliente até a última do vendedor. Só existe
  * quando o dia tem os dois momentos; sem eles, cai na janela observada (nunca inventa um intervalo).
  */
-export const responseMs = (conversation: TrackedConversation): number | null => {
-  const { lastClientAt, lastSellerAt } = momentsOf(conversation)
-  return span(at(lastClientAt), at(lastSellerAt)) ?? observedResponseMs(conversation)
-}
+export const responseMs = (conversation: TrackedConversation): number | null =>
+  span(at(conversation.lastClientAt), at(conversation.lastSellerAt)) ??
+  observedResponseMs(conversation)
 
 /** Média inteira das amostras; `null` quando não há nenhuma (não devolve `0` no lugar de "sem dado"). */
 const averageOf = (

@@ -5,7 +5,7 @@ import type { CoachingReport, DraftReview } from "~lib/ai/schemas"
 import { WAIT_LIMITS_MS } from "~lib/tracking/constants"
 import { conversationLabel, dayKey, waitElapsed, waitLevel } from "~lib/tracking/level"
 import { coachingSignal, reviewSignal, reviewSummary } from "~lib/tracking/signals"
-import { attachCoaching, attachReview, emptyDay, observeConversation } from "~lib/tracking/store"
+import { attachCoaching, attachReview, emptyDay, observeConversation, toDayLog } from "~lib/tracking/store"
 import type { ConversationObservation } from "~lib/tracking/store"
 import type { DayLog, TrackedConversation } from "~lib/tracking/types"
 
@@ -122,6 +122,9 @@ const conversation = (over: Partial<TrackedConversation> = {}): TrackedConversat
   lastMessageText: "Boa tarde",
   lastMessageAt: 1_000,
   clientSince: 1_000,
+  firstResponseAt: null,
+  lastClientAt: null,
+  lastSellerAt: null,
   messageCount: 1,
   reviewCount: 0,
   ...over
@@ -230,6 +233,66 @@ describe("observeConversation", () => {
     expect(second.conversations["chat-1"].clientSince).toBe(5_000)
   })
 
+  it("guarda o último instante em que cada autor falou, ignorando bot e sistema", () => {
+    const first = observeConversation(emptyDay("2026-10-07"), observation({ now: 5_000 }))
+    expect(first.conversations["chat-1"].lastClientAt).toBe(5_000)
+    expect(first.conversations["chat-1"].lastSellerAt).toBeNull()
+
+    const replied = observeConversation(
+      first,
+      observation({ now: 7_000, author: "vendedor", text: "Boa tarde!", messageCount: 2 })
+    )
+    expect(replied.conversations["chat-1"].lastSellerAt).toBe(7_000)
+    expect(replied.conversations["chat-1"].lastClientAt).toBe(5_000)
+
+    const withBot = observeConversation(
+      replied,
+      observation({ now: 8_000, author: "bot", text: "Bot parado", messageCount: 3 })
+    )
+    expect(withBot.conversations["chat-1"].lastClientAt).toBe(5_000)
+    expect(withBot.conversations["chat-1"].lastSellerAt).toBe(7_000)
+  })
+
+  it("grava firstResponseAt só na primeira resposta do vendedor no ciclo", () => {
+    const waiting = observeConversation(emptyDay("2026-10-07"), observation({ now: 5_000 }))
+    expect(waiting.conversations["chat-1"].firstResponseAt).toBeNull()
+
+    const firstReply = observeConversation(
+      waiting,
+      observation({ now: 7_000, author: "vendedor", text: "Boa tarde!", messageCount: 2 })
+    )
+    expect(firstReply.conversations["chat-1"].firstResponseAt).toBe(7_000)
+
+    const secondReply = observeConversation(
+      firstReply,
+      observation({ now: 9_000, author: "vendedor", text: "Alguma dúvida?", messageCount: 3 })
+    )
+    expect(secondReply.conversations["chat-1"].firstResponseAt).toBe(7_000)
+  })
+
+  it("zera firstResponseAt quando o cliente abre um novo ciclo", () => {
+    const firstReply = observeConversation(
+      observeConversation(emptyDay("2026-10-07"), observation({ now: 5_000 })),
+      observation({ now: 7_000, author: "vendedor", text: "Oi!", messageCount: 2 })
+    )
+    const reopened = observeConversation(
+      firstReply,
+      observation({ now: 9_000, author: "cliente", text: "E o prazo?", messageCount: 3 })
+    )
+    expect(reopened.conversations["chat-1"].firstResponseAt).toBeNull()
+    expect(reopened.conversations["chat-1"].lastClientAt).toBe(9_000)
+    expect(reopened.conversations["chat-1"].clientSince).toBe(9_000)
+  })
+
+  it("grava firstResponseAt na primeira mensagem do vendedor mesmo sem cliente observado", () => {
+    const day = observeConversation(
+      emptyDay("2026-10-07"),
+      observation({ now: 5_000, author: "vendedor", text: "Bom dia" })
+    )
+    expect(day.conversations["chat-1"].firstResponseAt).toBe(5_000)
+    expect(day.conversations["chat-1"].lastClientAt).toBeNull()
+  })
+
   it("zera clientSince quando o vendedor responde", () => {
     const waiting = observeConversation(emptyDay("2026-10-07"), observation({ now: 5_000 }))
     const answered = observeConversation(
@@ -329,6 +392,54 @@ describe("attachReview / attachCoaching", () => {
     expect(withBoth.conversations["chat-1"].lastCoaching).toBeDefined()
     expect(withBoth.conversations["chat-1"].reviewCount).toBe(1)
     expect(withBoth.updatedAt).toBe(2_000)
+  })
+})
+
+describe("toDayLog", () => {
+  it("normaliza registro parcial preenchendo os momentos ausentes com null", () => {
+    const day = toDayLog(
+      {
+        conversations: {
+          "chat-1": { key: "chat-1", openedAt: 1_000, clientSince: 1_000, messageCount: 1 }
+        },
+        updatedAt: 2_000
+      },
+      "2026-10-07"
+    )
+    expect(day.date).toBe("2026-10-07")
+    expect(day.updatedAt).toBe(2_000)
+    expect(day.conversations["chat-1"]).toMatchObject({
+      key: "chat-1",
+      firstResponseAt: null,
+      lastClientAt: null,
+      lastSellerAt: null,
+      clientSince: 1_000,
+      messageCount: 1
+    })
+  })
+
+  it("preserva os momentos já gravados e cai para a chave quando falta o rótulo", () => {
+    const day = toDayLog(
+      {
+        conversations: {
+          "chat-1": { firstResponseAt: 4_000, lastClientAt: 1_000, lastSellerAt: 5_000 }
+        }
+      },
+      "2026-10-07"
+    )
+    expect(day.conversations["chat-1"]).toMatchObject({
+      key: "chat-1",
+      label: "chat-1",
+      firstResponseAt: 4_000,
+      lastClientAt: 1_000,
+      lastSellerAt: 5_000
+    })
+    expect(day.updatedAt).toBe(0)
+  })
+
+  it("devolve um dia vazio para valor que não é um log", () => {
+    expect(toDayLog(null, "2026-10-07")).toEqual(emptyDay("2026-10-07"))
+    expect(toDayLog({ conversations: "nope" }, "2026-10-07")).toEqual(emptyDay("2026-10-07"))
   })
 })
 

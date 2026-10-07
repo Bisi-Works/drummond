@@ -11,7 +11,6 @@ import {
   responseMs,
   summarizeDay
 } from "~lib/tracking/summary"
-import type { ConversationMoments } from "~lib/tracking/summary"
 import { emptyDay } from "~lib/tracking/store"
 import type { DayLog, TrackedConversation } from "~lib/tracking/types"
 
@@ -20,10 +19,8 @@ import type { DayLog, TrackedConversation } from "~lib/tracking/types"
 
 const NOW = 1_800_000
 
-/** Conversa sintética com os momentos opcionais da Fase 02 (ainda não são campos do modelo). */
-type Fixture = TrackedConversation & ConversationMoments
-
-const conversation = (over: Partial<Fixture> = {}): Fixture => ({
+/** Conversa sintética do dia; os momentos de resposta vêm zerados e podem ser sobrescritos. */
+const conversation = (over: Partial<TrackedConversation> = {}): TrackedConversation => ({
   key: "chat-1",
   platform: "botconversa",
   label: "Cliente",
@@ -33,13 +30,16 @@ const conversation = (over: Partial<Fixture> = {}): Fixture => ({
   lastMessageText: "Boa tarde",
   lastMessageAt: 1_000,
   clientSince: 1_000,
+  firstResponseAt: null,
+  lastClientAt: null,
+  lastSellerAt: null,
   messageCount: 1,
   reviewCount: 0,
   ...over
 })
 
 /** Monta o dia a partir de uma lista; a ordem de inserção no objeto fica a critério do teste. */
-const day = (conversations: Fixture[], date = "2026-10-07"): DayLog => ({
+const day = (conversations: TrackedConversation[], date = "2026-10-07"): DayLog => ({
   date,
   conversations: Object.fromEntries(conversations.map((item) => [item.key, item])),
   updatedAt: 0
@@ -232,7 +232,7 @@ describe("attentionQueue", () => {
   const keys = (log: DayLog): string[] =>
     attentionQueue(log, NOW).map((item) => item.conversation.key)
 
-  const ordered = (): Fixture[] => [
+  const ordered = (): TrackedConversation[] => [
     conversation({ key: "verde", clientSince: NOW - 1_000 }),
     conversation({ key: "vermelho-curto", clientSince: NOW - (WAIT_LIMITS_MS.vermelho + 1_000) }),
     conversation({ key: "laranja", clientSince: NOW - (WAIT_LIMITS_MS.laranja + 1_000) }),

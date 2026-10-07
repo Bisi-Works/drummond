@@ -59,6 +59,13 @@ const localArea = (): chrome.storage.LocalStorageArea | null => {
   }
 }
 
+/** Número finito (não `NaN`/`Infinity`); registros parciais do storage podem trazer qualquer valor. */
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value)
+
+/** Número finito ou `null`, para normalizar campos numéricos opcionais na leitura. */
+const numberOrNull = (value: unknown): number | null => (isFiniteNumber(value) ? value : null)
+
 /** Dia vazio (nada registrado ainda); `updatedAt: 0` marca "sem gravação". */
 export const emptyDay = (date: string): DayLog => ({ date, conversations: {}, updatedAt: 0 })
 
@@ -73,9 +80,39 @@ const minimalConversation = (key: string, now: number): TrackedConversation => (
   lastMessageText: "",
   lastMessageAt: null,
   clientSince: null,
+  firstResponseAt: null,
+  lastClientAt: null,
+  lastSellerAt: null,
   messageCount: 0,
   reviewCount: 0
 })
+
+/**
+ * Normaliza um registro lido do storage. Dia gravado antes da Fase 02 (ou registro parcial criado
+ * por um sinal de IA antes do primeiro tick) não tem os momentos de resposta: aqui eles viram
+ * `null` e os demais campos ganham um padrão seguro, para o código consumidor nunca precisar
+ * checar a ausência de um campo. `lastReview`/`lastCoaching` passam como estavam.
+ */
+const normalizeConversation = (key: string, value: unknown): TrackedConversation => {
+  const stored = (value && typeof value === "object" ? value : {}) as Partial<TrackedConversation>
+  return {
+    ...stored,
+    key: typeof stored.key === "string" && stored.key ? stored.key : key,
+    platform: typeof stored.platform === "string" ? stored.platform : "",
+    label: typeof stored.label === "string" && stored.label ? stored.label : key,
+    openedAt: numberOrNull(stored.openedAt) ?? 0,
+    lastSeenAt: numberOrNull(stored.lastSeenAt) ?? 0,
+    lastMessageAuthor: stored.lastMessageAuthor ?? null,
+    lastMessageText: typeof stored.lastMessageText === "string" ? stored.lastMessageText : "",
+    lastMessageAt: numberOrNull(stored.lastMessageAt),
+    clientSince: numberOrNull(stored.clientSince),
+    firstResponseAt: numberOrNull(stored.firstResponseAt),
+    lastClientAt: numberOrNull(stored.lastClientAt),
+    lastSellerAt: numberOrNull(stored.lastSellerAt),
+    messageCount: numberOrNull(stored.messageCount) ?? 0,
+    reviewCount: numberOrNull(stored.reviewCount) ?? 0
+  }
+}
 
 /** Valida o que veio do storage; qualquer valor estranho vira um dia vazio. */
 export const toDayLog = (value: unknown, date: string): DayLog => {
@@ -83,10 +120,14 @@ export const toDayLog = (value: unknown, date: string): DayLog => {
   const stored = value as Partial<DayLog>
   const conversations = stored.conversations
   if (!conversations || typeof conversations !== "object") return emptyDay(date)
+  const normalized: Record<string, TrackedConversation> = {}
+  for (const [key, conversation] of Object.entries(conversations)) {
+    normalized[key] = normalizeConversation(key, conversation)
+  }
   return {
     date,
-    conversations: conversations as Record<string, TrackedConversation>,
-    updatedAt: typeof stored.updatedAt === "number" ? stored.updatedAt : 0
+    conversations: normalized,
+    updatedAt: numberOrNull(stored.updatedAt) ?? 0
   }
 }
 
@@ -132,6 +173,9 @@ export const clearDay = async (date: string = dayKey()): Promise<void> => {
  * não dá para reconstruir o instante da mensagem. Por isso a espera se apoia em `clientSince`: ele
  * é gravado na primeira vez que a última mensagem do cliente é vista e zerado quando o vendedor
  * responde (aí a conversa não está mais aguardando).
+ *
+ * Além da espera, cada mensagem atualiza os momentos usados pelas métricas (`lastClientAt`,
+ * `lastSellerAt`) e, na primeira resposta do vendedor de cada ciclo, `firstResponseAt`.
  */
 export const observeConversation = (prev: DayLog, input: ConversationObservation): DayLog => {
   const { key, now, author } = input
@@ -140,6 +184,14 @@ export const observeConversation = (prev: DayLog, input: ConversationObservation
 
   const clientSince =
     author === "vendedor" ? null : author === "cliente" ? (base.clientSince ?? now) : base.clientSince
+
+  // Momentos por autor: a última mensagem do cliente reabre o ciclo, então zera `firstResponseAt`
+  // (a próxima resposta do vendedor passa a ser a primeira do ciclo). Bot/sistema não mexem em
+  // nenhum dos três — só cliente e vendedor abrem e fecham uma espera.
+  const lastClientAt = author === "cliente" ? now : (base.lastClientAt ?? null)
+  const lastSellerAt = author === "vendedor" ? now : (base.lastSellerAt ?? null)
+  const firstResponseAt =
+    author === "cliente" ? null : (base.firstResponseAt ?? (author === "vendedor" ? now : null))
 
   const conversation: TrackedConversation = {
     ...base,
@@ -151,6 +203,9 @@ export const observeConversation = (prev: DayLog, input: ConversationObservation
     lastMessageText: input.text,
     lastMessageAt: author ? now : base.lastMessageAt,
     clientSince,
+    firstResponseAt,
+    lastClientAt,
+    lastSellerAt,
     messageCount: Math.max(base.messageCount, input.messageCount)
   }
 
@@ -231,9 +286,6 @@ export const subscribeDay = (onChange: DayChangeListener): (() => void) => {
   onChanged.addListener(listener)
   return () => onChanged.removeListener(listener)
 }
-
-const isFiniteNumber = (value: unknown): value is number =>
-  typeof value === "number" && Number.isFinite(value)
 
 /** Valida a posição salva; valor ausente, de outra versão ou corrompido cai na posição padrão. */
 export const toWidgetPosition = (value: unknown): WidgetPosition => {
