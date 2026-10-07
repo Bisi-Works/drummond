@@ -97,8 +97,11 @@ export const reportMetrics = (input: DailyReportInput): ReportMetric[] => [
   { label: "Tempo médio de resposta", value: durationOrDash(input.totals.averageResponseMs) }
 ]
 
-/** Data e hora locais do instante de geração: "02/10/2026 14:30". */
-const formatTimestamp = (at: number): string => {
+/**
+ * Data e hora locais do instante de geração: "02/10/2026 14:30". Usado tanto no cabeçalho da
+ * página do relatório quanto no HTML autocontido — o mesmo instante aparece igual nos dois.
+ */
+export const formatTimestamp = (at: number): string => {
   const date = new Date(at)
   const pad = (value: number) => String(value).padStart(2, "0")
   return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${pad(
