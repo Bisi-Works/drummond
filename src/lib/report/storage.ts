@@ -1,4 +1,6 @@
 import type { DailyReport } from "~lib/ai/schemas"
+import { config } from "~lib/config"
+import { dayKey } from "~lib/tracking/level"
 import type { DailyReportInput } from "~lib/tracking/report"
 
 // Persistência do relatório do dia em `chrome.storage.local`. Cada relatório fica na sua própria
@@ -12,6 +14,20 @@ export const REPORT_STORAGE_PREFIX = "drummond.report."
 
 /** Ponteiro para o último relatório gerado: `{ date, generatedAt }`. */
 export const REPORT_LATEST_KEY = "drummond.report.latest"
+
+/**
+ * Uma chave por dia (ex.: "drummond.report.generated.2026-10-07"): registra que o relatório daquela
+ * data já foi gerado, quantas vezes e quando. É a trava de 1 relatório por dia em produção.
+ */
+export const REPORT_GENERATED_PREFIX = "drummond.report.generated."
+
+/** Registro da trava diária: quando e quantas vezes o relatório daquele dia foi gerado. */
+export interface ReportGeneration {
+  /** Momento da última geração bem-sucedida (epoch ms). */
+  generatedAt: number
+  /** Gerações bem-sucedidas no dia; no mínimo 1 quando o registro existe. */
+  count: number
+}
 
 /**
  * Relatório guardado no storage. Além do texto gerado pela IA, guarda o `input` que o originou —
@@ -50,6 +66,9 @@ const localArea = (): chrome.storage.LocalStorageArea | null => {
 /** Chave completa de um relatório a partir da data. */
 const reportKey = (date: string): string => `${REPORT_STORAGE_PREFIX}${date}`
 
+/** Chave completa do registro de geração (trava diária) a partir da data. */
+const generatedKey = (date: string): string => `${REPORT_GENERATED_PREFIX}${date}`
+
 /** Data YYYY-MM-DD válida (o `listReportDates` ignora qualquer chave fora desse formato). */
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -64,6 +83,17 @@ const dateFromKey = (key: string): string | null => {
   if (!key.startsWith(REPORT_STORAGE_PREFIX)) return null
   const date = key.slice(REPORT_STORAGE_PREFIX.length)
   return DATE_RE.test(date) ? date : null
+}
+
+/**
+ * Normaliza o registro da trava diária: qualquer coisa fora de `{ generatedAt, count }` numéricos
+ * vira `null`, e `count` nunca é menor que 1 (um registro existente conta como uma geração).
+ */
+export const toReportGeneration = (value: unknown): ReportGeneration | null => {
+  if (!value || typeof value !== "object") return null
+  const stored = value as Partial<ReportGeneration>
+  if (!isFiniteNumber(stored.generatedAt) || !isFiniteNumber(stored.count)) return null
+  return { generatedAt: stored.generatedAt, count: Math.max(1, Math.trunc(stored.count)) }
 }
 
 /** Valida o ponteiro `latest`; qualquer formato inesperado vira `null`. */
@@ -147,6 +177,77 @@ export const listReportDates = async (): Promise<string[]> => {
   } catch {
     return []
   }
+}
+
+/**
+ * Lê a trava diária da data pedida; sem storage, sem chave ou com dado corrompido, devolve `null`.
+ * Silencioso quando o `chrome.storage` não existe (extensão recarregada com a página aberta).
+ */
+export const loadReportGeneration = async (
+  date: string
+): Promise<ReportGeneration | null> => {
+  const area = localArea()
+  if (!area) return null
+  try {
+    const key = generatedKey(date)
+    const items = await area.get(key)
+    return toReportGeneration(items?.[key])
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Marca o relatório da data como gerado (chamado só depois de um `ok: true` da IA). Soma 1 ao
+ * contador do dia e atualiza `generatedAt`. Silencioso sem storage — a falha da IA, por não chamar
+ * isto, não consome a cota do dia.
+ */
+export const markReportGenerated = async (
+  date: string,
+  now: number = Date.now()
+): Promise<void> => {
+  const area = localArea()
+  if (!area) return
+  const previous = await loadReportGeneration(date)
+  try {
+    await area.set({
+      [generatedKey(date)]: {
+        generatedAt: now,
+        count: (previous?.count ?? 0) + 1
+      } satisfies ReportGeneration
+    })
+  } catch {
+    // Sem storage (extensão recarregada): a trava daquela sessão segue só em memória.
+  }
+}
+
+/** Apaga a trava da data (só o caminho de dev usa: "Gerar novamente" para repetir os testes). */
+export const clearReportGeneration = async (date: string): Promise<void> => {
+  const area = localArea()
+  if (!area) return
+  try {
+    await area.remove(generatedKey(date))
+  } catch {
+    // Sem storage: não há nada persistido para apagar.
+  }
+}
+
+/**
+ * Diz se o relatório da `date` ainda pode ser gerado agora. A trava é por dia local: o registro é
+ * lido da chave da própria data, então um relatório gerado ontem não bloqueia hoje. `now` entra na
+ * checagem da virada (se o dia já virou, a cota lida de outra data não vale) e `reportUnlimited`
+ * libera tudo — é o padrão em `pnpm dev`, para testar sem consumir a cota.
+ */
+export const canGenerateReport = async (
+  date: string,
+  now: number = Date.now()
+): Promise<boolean> => {
+  if (config.reportUnlimited) return true
+  const generation = await loadReportGeneration(date)
+  if (!generation) return true
+  // A cota só vale enquanto o dia pedido ainda é o dia local de `now`; depois da virada renova.
+  if (dayKey(new Date(now)) !== date) return true
+  return generation.count < config.reportLimitPerDay
 }
 
 /**

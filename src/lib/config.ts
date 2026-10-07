@@ -102,6 +102,19 @@ export const config = {
   /** O coaching olha a conversa inteira carregada na tela, até este limite. */
   coachMessages: 80,
   denyDataCollection: process.env.PLASMO_PUBLIC_DENY_DATA_COLLECTION !== "false",
+  /**
+   * Quantos relatórios por dia o vendedor pode gerar em produção (ver `canGenerateReport`).
+   * Padrão 1: um relatório por dia, que é o custo previsto do recurso.
+   */
+  reportLimitPerDay: toNumber(process.env.PLASMO_PUBLIC_REPORT_LIMIT_PER_DAY) ?? 1,
+  /**
+   * Libera a trava diária. `true` por padrão no `pnpm dev` (para repetir os testes sem consumir a
+   * cota) ou quando `PLASMO_PUBLIC_REPORT_UNLIMITED=true` — que só deve existir numa build de
+   * homologação, nunca na de produção dos vendedores.
+   */
+  reportUnlimited:
+    process.env.NODE_ENV === "development" ||
+    process.env.PLASMO_PUBLIC_REPORT_UNLIMITED === "true",
   /** Custo estimado/efetivo das análises: só no `pnpm dev` (NODE_ENV vem do Parcel/Plasmo). */
   showCosts: process.env.NODE_ENV === "development"
 } as const

@@ -1,18 +1,33 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DailyReport } from "~lib/ai/schemas"
 import {
+  canGenerateReport,
+  clearReportGeneration,
   listReportDates,
   loadLatestReportRef,
   loadReport,
+  loadReportGeneration,
+  markReportGenerated,
+  REPORT_GENERATED_PREFIX,
   REPORT_LATEST_KEY,
   REPORT_STORAGE_PREFIX,
   saveReport,
+  toReportGeneration,
   toReportRef,
   toStoredReport,
   type StoredReport
 } from "~lib/report/storage"
 import type { DailyReportInput } from "~lib/tracking/report"
+
+// `config` é embutido em tempo de build e imutável no módulo real; aqui um objeto mutável permite
+// cobrir `reportUnlimited` sem reimportar o storage a cada caso.
+const mockedConfig = vi.hoisted(() => ({ reportUnlimited: false, reportLimitPerDay: 1 }))
+
+vi.mock("~lib/config", () => ({ config: mockedConfig }))
+
+/** Instante dentro do dia local "2026-10-07" (a trava compara a data com `dayKey(now)`). */
+const NOW = new Date(2026, 9, 7, 12, 0).getTime()
 
 // Persistência do relatório com um `chrome.storage.local` de mentira, no mesmo estilo de
 // `tracking-storage.test.ts`: o módulo lê o global na hora da chamada, então o stub manda no
@@ -63,6 +78,11 @@ const installChrome = (initial: Record<string, unknown> = {}): FakeChrome => {
     }
   }
 }
+
+beforeEach(() => {
+  mockedConfig.reportUnlimited = false
+  mockedConfig.reportLimitPerDay = 1
+})
 
 afterEach(() => {
   Reflect.deleteProperty(globalThis, "chrome")
@@ -199,6 +219,77 @@ describe("listReportDates", () => {
 
   it("devolve lista vazia sem storage", async () => {
     await expect(listReportDates()).resolves.toEqual([])
+  })
+})
+
+describe("trava diária do relatório", () => {
+  it("permite gerar sem registro e bloqueia após marcar em produção", async () => {
+    const chrome = installChrome()
+
+    await expect(canGenerateReport("2026-10-07", NOW)).resolves.toBe(true)
+
+    await markReportGenerated("2026-10-07", NOW)
+
+    expect(chrome.data.get(`${REPORT_GENERATED_PREFIX}2026-10-07`)).toEqual({
+      generatedAt: NOW,
+      count: 1
+    })
+    await expect(loadReportGeneration("2026-10-07")).resolves.toEqual({
+      generatedAt: NOW,
+      count: 1
+    })
+    await expect(canGenerateReport("2026-10-07", NOW)).resolves.toBe(false)
+  })
+
+  it("soma as gerações do mesmo dia", async () => {
+    installChrome()
+
+    await markReportGenerated("2026-10-07", NOW)
+    await markReportGenerated("2026-10-07", NOW + 1_000)
+
+    await expect(loadReportGeneration("2026-10-07")).resolves.toEqual({
+      generatedAt: NOW + 1_000,
+      count: 2
+    })
+  })
+
+  it("libera quando reportUnlimited", async () => {
+    installChrome()
+    await markReportGenerated("2026-10-07", NOW)
+    mockedConfig.reportUnlimited = true
+
+    await expect(canGenerateReport("2026-10-07", NOW)).resolves.toBe(true)
+  })
+
+  it("libera um dia novo e limpa a marca no dev", async () => {
+    const chrome = installChrome()
+    await markReportGenerated("2026-10-07", NOW)
+
+    await expect(canGenerateReport("2026-10-07", NOW)).resolves.toBe(false)
+    await expect(
+      canGenerateReport("2026-10-08", new Date(2026, 9, 8, 9, 0).getTime())
+    ).resolves.toBe(true)
+
+    await clearReportGeneration("2026-10-07")
+    expect(chrome.data.has(`${REPORT_GENERATED_PREFIX}2026-10-07`)).toBe(false)
+    await expect(canGenerateReport("2026-10-07", NOW)).resolves.toBe(true)
+  })
+
+  it("devolve null/true e não lança sem storage", async () => {
+    Reflect.deleteProperty(globalThis, "chrome")
+
+    await expect(loadReportGeneration("2026-10-07")).resolves.toBeNull()
+    await expect(canGenerateReport("2026-10-07", NOW)).resolves.toBe(true)
+    await expect(markReportGenerated("2026-10-07")).resolves.toBeUndefined()
+    await expect(clearReportGeneration("2026-10-07")).resolves.toBeUndefined()
+  })
+
+  it("toReportGeneration normaliza count e descarta registro corrompido", () => {
+    expect(toReportGeneration({ generatedAt: 5, count: 2 })).toEqual({ generatedAt: 5, count: 2 })
+    expect(toReportGeneration({ generatedAt: 5, count: 0 })).toEqual({ generatedAt: 5, count: 1 })
+    expect(toReportGeneration({ generatedAt: 5 })).toBeNull()
+    expect(toReportGeneration({ generatedAt: "ontem", count: 1 })).toBeNull()
+    expect(toReportGeneration(null)).toBeNull()
   })
 })
 

@@ -8,10 +8,11 @@ risco de gasto descontrolado nem de tela quebrada quando algo falha.
 
 ## Tasks
 
-- [ ] Implementar a trava diária em `src/lib/report/storage.ts` e `src/lib/config.ts`:
+- [x] Implementar a trava diária em `src/lib/report/storage.ts` e `src/lib/config.ts`:
   - Adicionar `REPORT_GENERATED_PREFIX = "drummond.report.generated."` com `loadReportGeneration(date)` retornando `{ generatedAt: number, count: number } | null`, `markReportGenerated(date)` (grava no sucesso) e `clearReportGeneration(date)`.
   - Em `config.ts`, expor `reportLimitPerDay: toNumber(process.env.PLASMO_PUBLIC_REPORT_LIMIT_PER_DAY) ?? 1` e `reportUnlimited: process.env.NODE_ENV === "development" || process.env.PLASMO_PUBLIC_REPORT_UNLIMITED === "true"`; documentar as duas variáveis em `.env.example`.
   - Criar `canGenerateReport(date, now)` combinando a contagem com o limite, considerando `reportUnlimited` e a virada de dia via `dayKey` (um relatório gerado ontem não bloqueia hoje).
+  - _Feito: storage com normalizador `toReportGeneration` (silencioso sem `chrome.storage`), `markReportGenerated` somando `count`; `canGenerateReport` libera no dev/past-unlimited e renova a cota quando `dayKey(now) !== date`. `.env.example` ganhou `PLASMO_PUBLIC_REPORT_LIMIT_PER_DAY` e `PLASMO_PUBLIC_REPORT_UNLIMITED` (default `false`). Coberto em `tests/report-storage.test.ts` (238 testes passando, `tsc --noEmit` limpo)._
 
 - [ ] Aplicar a trava no fluxo de geração do widget (`src/components/DayWidget.tsx`):
   - Antes de chamar o background, checar `canGenerateReport(date)`. Se bloqueado, não disparar request: mudar o botão para "Relatório de hoje já gerado" com uma ação secundária "Abrir relatório" (usa `saveReport`/`loadReport` da data para montar a URL da tab).
