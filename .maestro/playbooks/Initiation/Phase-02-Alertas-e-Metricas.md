@@ -108,4 +108,10 @@ final da fase, `pnpm test` e `pnpm typecheck` passam e o painel lateral exibe o 
 
 > **Nota de ambiente (2026-10-07):** `pnpm` não está no PATH do shell do agente (`pnpm: command not found`). Os equivalentes usados nesta fase e que rodam são `./node_modules/.bin/vitest run` e `./node_modules/.bin/tsc --noEmit`.
 
-- [ ] Rodar `pnpm test` e `pnpm typecheck`, corrigir as falhas e confirmar que nenhum teste anterior foi enfraquecido.
+- [x] Rodar `pnpm test` e `pnpm typecheck`, corrigir as falhas e confirmar que nenhum teste anterior foi enfraquecido.
+
+> **Verificação final da fase aprovada (2026-10-07).** Nenhuma correção foi necessária: os dois comandos passam no estado atual da `main`.
+> - **`pnpm test`:** `./node_modules/.bin/vitest run` → **13 arquivos, 182/182 testes** (a contagem da fase anterior, 162, mais os 20 casos de virada de dia/storage desta fase). Nenhum teste pulado, nenhum `fail`, nenhum enfraquecido — só adições desde a Fase 01 e nenhuma asserção existente foi relaxada.
+> - **`pnpm typecheck`:** `./node_modules/.bin/tsc --noEmit` → **exit 0**, sem `any` novo nem `@ts-expect-error`.
+> - **Equivalência:** como registrado na nota de ambiente do fim da fase, `pnpm` não está no PATH do shell do agente; o `package.json` define `test` como `vitest run` e `typecheck` como `tsc --noEmit`, então os binários locais executam exatamente os mesmos comandos.
+> - **Sem alteração de código-fonte:** esta tarefa é só de verificação; a marcação do checkbox é a única mudança do run (o documento fica fora do Git pela raiz, então não há commit de código a fazer).
