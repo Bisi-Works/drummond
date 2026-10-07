@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { ChatAdapter, ChatMessage } from "~adapters/types"
 import { config as appConfig } from "~lib/config"
 import { conversationLabel, dayKey } from "~lib/tracking/level"
+import { attentionQueue, summarizeDay, type AttentionItem, type DaySummary } from "~lib/tracking/summary"
 import {
   emptyDay,
   loadDay,
@@ -50,6 +51,12 @@ export interface DayTracking {
   conversations: TrackedConversation[]
   /** Instante do último tick, para os chips de espera e contadores avançarem sozinhos. */
   now: number
+  /** Totais do dia (`summarizeDay`): acompanhadas, aguardando, respondidas e médias. */
+  summary: DaySummary
+  /** Fila do que precisa de ação (`attentionQueue`), da mais urgente para a menos urgente. */
+  attention: AttentionItem[]
+  /** Atalho de `summary.alerts`: conversas aguardando em laranja ou vermelho. */
+  alertCount: number
 }
 
 /**
@@ -140,6 +147,13 @@ export const useDayTracking = (adapter: ChatAdapter | null, intervalMs = 1000): 
     }
   }, [adapter, intervalMs])
 
+  // Agregações memoizadas por uma assinatura estável: o objeto `day` só troca de identidade quando
+  // há gravação e o relógio é arredondado ao segundo. Assim o tick de 1 s não recalcula os totais a
+  // cada render — só quando o segundo vira — mas os níveis de espera seguem o tempo que passa.
+  const nowSecond = Math.floor(now / 1000)
+  const summary = useMemo(() => summarizeDay(day, nowSecond * 1000), [day, nowSecond])
+  const attention = useMemo(() => attentionQueue(day, nowSecond * 1000), [day, nowSecond])
+
   const conversations = Object.values(day.conversations).sort(byLastSeen)
-  return { day, conversations, now }
+  return { day, conversations, now, summary, attention, alertCount: summary.alerts }
 }
