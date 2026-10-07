@@ -93,9 +93,11 @@ pnpm package                        # zip em build/ para enviar às pessoas que 
 typecheck, build e a checagem). A build de produção do Plasmo pode quebrar código que funciona
 no `pnpm dev`: o tree-shaking do Parcel e o SWC antigo já descartaram o zod e corromperam uma
 regex. Por isso a checagem não só compila, ela **executa** os bundles em um navegador simulado:
-service worker (com OpenRouter falso, inclusive o streaming), content script (com a fixture do
-Botconversa) e side panel (com o relatório chegando aos pedaços). Ela também confere que a chave
-só está no background. O modelo ativo e a versão do prompt aparecem no rodapé do card e do painel.
+service worker (com OpenRouter falso, inclusive o streaming, e as rotas `review-draft` e
+`generate-report`), content script (com a fixture do Botconversa) e side panel (com o relatório
+chegando aos pedaços). Ela também confere que a chave só está no background e que o bundle do
+content script referencia as rotas `generate-report`/`open-report`. O modelo ativo e a versão do
+prompt aparecem no rodapé do card e do painel.
 
 **Provedores.** O mesmo modelo roda em vários provedores, com preço e velocidade bem diferentes.
 Sem orientação, o OpenRouter prioriza os mais baratos. Para o DeepSeek V4 Flash, o mais barato
@@ -174,7 +176,7 @@ que não são texto do vendedor, com trecho inexistente ou sugestão igual ao or
 | Formato da resposta (JSON Schema + validação) | `src/lib/ai/schemas.ts` |
 | Seletores do Botconversa | `src/adapters/botconversa.ts` (e a fixture em `tests/fixtures/`) |
 | Nova plataforma de chat | novo adapter em `src/adapters/`, registrado em `adapters/index.ts` e no `matches` de `src/contents/companion.tsx` |
-| Nova rota de mensagem do background | arquivo em `src/background/messages/` **e** o nome da rota em `src/types/plasmo-messaging.d.ts` (o `.plasmo/messaging.d.ts` que o Plasmo gera é ignorado pelo git, e sem essa declaração o `pnpm typecheck` num clone limpo falha) |
+| Nova rota de mensagem do background | arquivo em `src/background/messages/` **e** o nome da rota em `src/types/plasmo-messaging.d.ts` (o `.plasmo/messaging.d.ts` que o Plasmo gera é ignorado pelo git, e sem essa declaração o `pnpm typecheck` num clone limpo falha). Não há registro manual no `src/background/index.ts`: o Plasmo descobre as rotas pelo nome do arquivo |
 
 ### Se o Botconversa mudar a interface
 

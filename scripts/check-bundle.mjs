@@ -92,6 +92,14 @@ const fakeModel = {
       timing: { status: "pendente", evidence: "Não abordado.", question: "Para quando precisa?" }
     },
     nextStep: "Enviar proposta."
+  },
+  // Relatório diário da rota "generate-report" (e do botão "Encerrar o dia" no widget).
+  daily: {
+    resumo: "Dia produtivo, com uma pendência.",
+    acertos: ["Respondeu rápido a Loja X."],
+    erros: [],
+    melhorias: ["Retomar a conversa parada na segunda-feira."],
+    pendencias: ["Falar com a Loja X."]
   }
 }
 const requests = []
@@ -106,8 +114,10 @@ const fetchStub = async (url, init) => {
   }
   const body = JSON.parse(init.body)
   requests.push(body)
-  const isReview = body.messages[0].content.includes("Tarefa: revisar o rascunho")
-  const content = JSON.stringify(isReview ? fakeModel.review : fakeModel.coach)
+  const system = body.messages[0].content
+  const isReview = system.includes("Tarefa: revisar o rascunho")
+  const isDaily = system.includes("Tarefa: relatório diário de coaching")
+  const content = JSON.stringify(isReview ? fakeModel.review : isDaily ? fakeModel.daily : fakeModel.coach)
   const usage = { prompt_tokens: 1000, completion_tokens: 200, cost: 0.00054 }
   if (!body.stream) {
     return new Response(JSON.stringify({ provider: "Fake", usage, choices: [{ message: { content } }] }))
@@ -172,6 +182,27 @@ try {
   check(validFormat(reviewRequest, "status,warnings,suggestedText,changes"), `formato de resposta do review vai completo (${reviewRequest?.response_format?.type})`)
   check(reviewRequest?.provider?.require_parameters === true && !reviewRequest?.stream, `review: requisição exige provedor compatível, sem streaming (${describeRequest(reviewRequest)})`)
 
+  // Rota do relatório diário, pelo mesmo caminho que o widget do content script usa
+  // (`sendToBackground("generate-report")`): o handler é descoberto pelo nome do arquivo em
+  // `src/background/messages/`, sem registro manual no `background/index.ts`.
+  const dailyInput = {
+    date: "2026-10-07",
+    totals: {
+      conversations: 1, waiting: 1, answered: 0, withoutMessage: 0, reviews: 0, coachings: 0,
+      alerts: 1, waitingByLevel: { verde: 0, amarelo: 0, laranja: 1, vermelho: 0 },
+      averageFirstResponseMs: null, averageResponseMs: null
+    },
+    conversations: [{
+      key: "1", label: "Loja X", platform: "botconversa", lastMessageAuthor: "cliente",
+      lastMessage: "Oi", messageCount: 2,
+      status: { state: "aguardando", elapsedMs: 90_000, level: "laranja" }
+    }]
+  }
+  const daily = await deliver(listeners, { name: "generate-report", body: { report: dailyInput } })
+  check(daily?.ok === true && daily.data.resumo === fakeModel.daily.resumo, `generate-report responde (${daily?.ok ? "ok" : daily?.error})`)
+  const dailyRequest = requests.at(-1)
+  check(validFormat(dailyRequest, "resumo,acertos,erros,melhorias,pendencias"), `formato de resposta do relatório diário (${dailyRequest?.response_format?.type})`)
+
   check(connectListeners.length > 0, "service worker registra o listener de conexões (coaching)")
   const messages = await connect(connectListeners, "coach-conversation", { conversation })
   const deltas = messages.filter((m) => m.type === "delta")
@@ -208,6 +239,11 @@ try {
 
   check(errors.length === 0, `content script executa sem erro${errors.length ? `: ${errors[0]}` : ""}`)
   check(!!window.document.querySelector("plasmo-csui"), "content script monta a UI na página")
+  const contentBundle = script.js.map(read).join("")
+  check(
+    contentBundle.includes("generate-report") && contentBundle.includes("open-report"),
+    "content script referencia as rotas generate-report/open-report (sem a chave da API)"
+  )
   const response = await deliver(listeners, { name: "get-conversation" })
   check(response?.conversation?.length === 10 && response.conversationKey === "123", `get-conversation lê a conversa (${response?.conversation?.length ?? 0} mensagens)`)
   await window.happyDOM.close()
