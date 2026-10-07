@@ -33,17 +33,30 @@ const WAIT_CHIP: Record<WaitLevel, string> = {
   vermelho: "bg-rose-100 text-rose-800 dark:bg-rose-500/15 dark:text-rose-200"
 }
 
+/** Contorno da linha que precisa de ação (mesmo semáforo do chip, em `ring` para não brigar com a borda base). */
+const WAIT_ROW: Record<WaitLevel, string> = {
+  verde: "ring-emerald-400/70 dark:ring-emerald-500/40",
+  amarelo: "ring-amber-400/70 dark:ring-amber-400/40",
+  laranja: "ring-orange-400/80 dark:ring-orange-500/50",
+  vermelho: "ring-rose-500/80 dark:ring-rose-500/60"
+}
+
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
-/** Tempo de espera em texto curto: "agora", "5 min", "1 h 5 min". */
-const formatWait = (elapsedMs: number): string => {
-  const minutes = Math.floor(elapsedMs / 60_000)
-  if (minutes < 1) return "agora"
+/** Duração em texto curto: "45 s", "5 min", "1 h 5 min". */
+const formatDuration = (elapsedMs: number): string => {
+  const seconds = Math.max(0, Math.round(elapsedMs / 1000))
+  if (seconds < 60) return `${seconds} s`
+  const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes} min`
   const hours = Math.floor(minutes / 60)
   const rest = minutes % 60
   return rest ? `${hours} h ${rest} min` : `${hours} h`
 }
+
+/** Tempo de espera em texto curto: "agora" abaixo de um minuto, senão igual a `formatDuration`. */
+const formatWait = (elapsedMs: number): string =>
+  elapsedMs < 60_000 ? "agora" : formatDuration(elapsedMs)
 
 /** Data local YYYY-MM-DD em "DD/MM/AAAA" (sem `Date` para não escorregar de fuso). */
 const formatDayLabel = (date: string): string => {
@@ -55,7 +68,15 @@ const formatDayLabel = (date: string): string => {
 const idleLabel = (conversation: TrackedConversation): string =>
   conversation.lastMessageAuthor === "vendedor" ? "respondido" : "sem pendência"
 
-const ConversationRow = ({ conversation, now }: { conversation: TrackedConversation; now: number }) => {
+const ConversationRow = ({
+  conversation,
+  now,
+  highlighted
+}: {
+  conversation: TrackedConversation
+  now: number
+  highlighted: boolean
+}) => {
   const elapsed = waitElapsed(conversation, now)
   const level = elapsed === null ? null : waitLevel(elapsed)
   const preview = conversation.lastMessageText.trim() || "Sem mensagens ainda"
@@ -66,7 +87,10 @@ const ConversationRow = ({ conversation, now }: { conversation: TrackedConversat
       : null
 
   return (
-    <li className="rounded-lg border border-line bg-muted/60 px-2.5 py-2">
+    <li
+      className={`rounded-lg border border-line bg-muted/60 px-2.5 py-2 ${
+        highlighted ? `ring-1 ring-inset ${WAIT_ROW[level ?? "verde"]}` : ""
+      }`}>
       <div className="flex items-start justify-between gap-2">
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-fg" title={conversation.label}>
           {conversation.label}
@@ -77,7 +101,7 @@ const ConversationRow = ({ conversation, now }: { conversation: TrackedConversat
           </span>
         ) : (
           <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-fg-subtle">
-            {idleLabel(conversation)}
+            {highlighted ? "aguardando" : idleLabel(conversation)}
           </span>
         )}
       </div>
@@ -107,7 +131,7 @@ interface Props {
 }
 
 export const DayWidget = ({ adapter }: Props) => {
-  const { day, conversations, now } = useDayTracking(adapter)
+  const { day, conversations, now, summary, attention, alertCount } = useDayTracking(adapter)
   const [position, setPosition] = useState<WidgetPosition>(DEFAULT_WIDGET_POSITION)
   const rootRef = useRef<HTMLDivElement>(null)
   const positionRef = useRef(position)
@@ -173,6 +197,13 @@ export const DayWidget = ({ adapter }: Props) => {
 
   const toggleMinimized = () => persist({ ...positionRef.current, minimized: !positionRef.current.minimized })
 
+  // Fila de atenção primeiro (ordem de `attentionQueue`), depois o resto como já vinha (última vista).
+  const attentionKeys = new Set(attention.map((item) => item.conversation.key))
+  const ordered = [
+    ...attention.map((item) => item.conversation),
+    ...conversations.filter((conversation) => !attentionKeys.has(conversation.key))
+  ]
+
   const style: CSSProperties = { position: "fixed", top: position.top }
   if (position.left !== undefined) style.left = position.left
   else style.right = position.right ?? DEFAULT_WIDGET_POSITION.right
@@ -194,6 +225,13 @@ export const DayWidget = ({ adapter }: Props) => {
         className="flex cursor-grab touch-none select-none items-center justify-between gap-2 rounded-t-xl border-b border-white/10 bg-black pl-3 pr-1.5 active:cursor-grabbing">
         <Wordmark />
         <div className="flex items-center gap-1.5">
+          {alertCount > 0 && (
+            <span
+              className="shrink-0 rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white"
+              title={`${alertCount} conversa${alertCount > 1 ? "s" : ""} aguardando em laranja ou vermelho`}>
+              {alertCount}
+            </span>
+          )}
           <span className="text-[11px] leading-none text-gray-400">
             {formatDayLabel(day.date)} · {conversations.length}
           </span>
@@ -209,19 +247,38 @@ export const DayWidget = ({ adapter }: Props) => {
       </div>
 
       {!position.minimized && (
-        <div style={{ width: CARD_WIDTH }} className="flex-1 overflow-y-auto p-2.5">
-          {conversations.length === 0 ? (
-            <p className="px-1 py-6 text-center text-xs text-fg-subtle">
-              Nenhuma conversa acompanhada hoje ainda
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {conversations.map((conversation) => (
-                <ConversationRow key={conversation.key} conversation={conversation} now={now} />
-              ))}
-            </ul>
+        <>
+          <div style={{ width: CARD_WIDTH }} className="flex-1 overflow-y-auto p-2.5">
+            {conversations.length === 0 ? (
+              <p className="px-1 py-6 text-center text-xs text-fg-subtle">
+                Nenhuma conversa acompanhada hoje ainda
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {ordered.map((conversation) => (
+                  <ConversationRow
+                    key={conversation.key}
+                    conversation={conversation}
+                    now={now}
+                    highlighted={attentionKeys.has(conversation.key)}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+          {conversations.length > 0 && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line px-2.5 py-2 text-[11px] text-fg-muted">
+              <span>{summary.conversations} acompanhadas</span>
+              <span>{summary.waiting} aguardando</span>
+              <span>{summary.answered} respondidas</span>
+              {summary.averageFirstResponseMs !== null && (
+                <span title="Média do tempo até a primeira resposta do vendedor">
+                  1ª resposta em {formatDuration(summary.averageFirstResponseMs)}
+                </span>
+              )}
+            </div>
           )}
-        </div>
+        </>
       )}
     </div>
   )

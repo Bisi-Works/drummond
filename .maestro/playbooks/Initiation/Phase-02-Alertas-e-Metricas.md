@@ -56,10 +56,16 @@ final da fase, `pnpm test` e `pnpm typecheck` passam e o painel lateral exibe o 
 > - **Sem teste de hook:** a infra de teste atual não tem `@testing-library/react` e as funções que o hook apenas agrega (`summarizeDay`/`attentionQueue`) já têm cobertura própria em `tests/tracking-summary.test.ts` (23 casos); o checkbox de testes desta fase cobre a virada de dia e o storage com stub de `chrome`, então não valeu adicionar dependência só para o encanamento React.
 > - **Verificação:** `tsc --noEmit` → **exit 0** e `vitest run` → **162/162** (nenhum teste existente quebrado). A UI do widget (próximo checkbox) e o painel lateral passam a consumir esses campos.
 
-- [ ] Atualizar `src/components/DayWidget.tsx` para usar os alertas:
+- [x] Atualizar `src/components/DayWidget.tsx` para usar os alertas:
   - Mostrar um badge no cabeçalho com `alertCount` quando houver conversas em laranja/vermelho e destacar essas linhas no topo da lista (ordem vinda de `attention`).
   - Exibir, no rodapé do widget, totais curtos do dia (acompanhadas, aguardando, respondidas) e o tempo médio de primeira resposta quando disponível.
   - Manter o comportamento responsivo/arrastável e o tema já implementados, sem introduzir dependência de IA.
+
+> **Alertas e totais no widget (2026-10-07).** `src/components/DayWidget.tsx` + o bullet do widget no `README.md`. O widget passa a consumir `summary`, `attention` e `alertCount` do `useDayTracking`, sem regra de espera própria nem chamada de IA.
+> - **Badge no cabeçalho:** pílula vermelha com `alertCount` (laranja + vermelho) só quando `> 0`, com `title` explicando a contagem; data e total de conversas seguem ao lado.
+> - **Fila no topo:** a lista renderiza `attention.map(...)` primeiro (na ordem já testada de `attentionQueue`) e depois o restante na ordem "vista por último" que o hook já entregava. As linhas em atenção ganham `ring` colorido pelo nível (`WAIT_ROW`, o mesmo semáforo do chip) e, quando não há `clientSince` para medir o tempo, o chip mostra "aguardando" em vez de "sem pendência".
+> - **Rodapé:** totais curtos (acompanhadas, aguardando, respondidas) e "1ª resposta em X" quando `summary.averageFirstResponseMs` existe. `formatDuration` cobre segundos/minutos/horas e `formatWait` foi reduzido a chamá-lo, devolvendo "agora" abaixo de 1 min (sem duplicar a formatação). O rodapé só aparece com conversas no dia e some ao minimizar — arrastar/minimizar e o tema seguem intactos.
+> - **Sem teste de componente:** a infra não tem `@testing-library/react` e a regra de negócio (`summarizeDay`/`attentionQueue`) já está coberta em `tests/tracking-summary.test.ts`; mesmo critério do checkbox do hook. `tsc --noEmit` → **exit 0** e `vitest run` → **162/162** (nada quebrado).
 
 - [ ] Adicionar um resumo do dia no `src/sidepanel.tsx`:
   - Incluir uma seção "Resumo do dia" (componente novo `src/components/DayOverview.tsx`) acima ou abaixo da análise de coaching, com os totais de `summarizeDay` e a lista `attention` com chips coloridos e tempo de espera.

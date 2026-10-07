@@ -18,8 +18,11 @@ cabeçalho do painel lateral troca para o claro, e a escolha vale também para o
   o modelo escreve (streaming).
 - **Widget do dia**: um painel flutuante e arrastável (posição e minimizado são lembrados) lista as
   conversas abertas no dia, com um chip de tempo de espera (verde → vermelho) desde a última
-  mensagem do cliente. O registro é local (`chrome.storage.local`), sincroniza entre as abas e não
-  faz nenhuma chamada de IA: revisões e coachings já feitos aparecem anexados à conversa.
+  mensagem do cliente. Um badge no cabeçalho conta as conversas em alerta (laranja/vermelho), essas
+  linhas sobem para o topo com destaque colorido, e o rodapé traz os totais do dia (acompanhadas,
+  aguardando, respondidas) e a média até a primeira resposta. O registro é local
+  (`chrome.storage.local`), sincroniza entre as abas e não faz nenhuma chamada de IA: revisões e
+  coachings já feitos aparecem anexados à conversa.
 
 Stack: [Plasmo](https://docs.plasmo.com/) (React + TypeScript), Tailwind CSS 3 e OpenRouter.
 
