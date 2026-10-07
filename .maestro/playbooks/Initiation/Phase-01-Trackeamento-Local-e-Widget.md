@@ -99,10 +99,33 @@ aparece de verdade na página do Botconversa. Nenhuma decisão do usuário é ne
 > - **Tema/shadow DOM:** o widget fica dentro do wrapper `dark`/`font-sans` que já envolvia o card e herda o `useTheme` sem código novo; `getStyle` continua trocando `:root` → `:host(plasmo-csui)` e o `DayWidget` só usa variáveis de tema (`bg-surface`, `text-fg`, `border-line`), então nada vaza para a página.
 > - **Verificação:** `vitest run` → 109/109 (nenhum teste cobre o content script hoje). `tsc --noEmit` segue com **apenas** o erro pré-existente de `src/contents/companion.tsx` (`sendToBackground` tipa a resposta como `never`; a linha só andou de 109 para 110), que a última tarefa da fase resolve — não mexi nele para não misturar escopos.
 
-- [ ] Escrever `tests/tracking.test.ts` cobrindo a lógica pura (sem depender de rede ou de IA):
+- [x] Escrever `tests/tracking.test.ts` cobrindo a lógica pura (sem depender de rede ou de IA):
   - `waitLevel` nos limites exatos (6/12/18 min e acima), `dayKey` com uma data local fixa, e `waitElapsed` para os casos aguardando vs. respondido.
   - `observeConversation`: abertura nova, atualização da mesma conversa, `clientSince` gravado só uma vez, zerado quando o vendedor responde, e `openedAt` preservado.
   - `attachReview`/`attachCoaching` anexando a conversa certa e incrementando `reviewCount`.
   - Virada de dia: `DayLog` de datas distintas não se misturam ao chamar as funções com `date` explícita.
+
+> **Testes puros do tracking escritos (2026-10-07).** `tests/tracking.test.ts` foi estendido (o arquivo já
+> existia com `conversationLabel` e os resumos de sinal das tarefas anteriores) com **23 casos novos**, em
+> quatro blocos `describe`, todos sobre funções puras — sem `chrome.storage`, sem rede e sem IA:
+> - **`waitLevel`:** limites exatos 6/12/18 min (inclusive) e o salto para `vermelho` acima de 18 min, sem teto.
+> - **`dayKey`:** data local de 23h59 que, via `toISOString`/UTC, já cairia no dia seguinte; zero à esquerda de
+>   mês/dia; e o formato do dia local de `new Date()` quando não se passa argumento.
+> - **`waitElapsed`:** aguardando (diferença de `clientSince`), `null` quando não aguarda e nunca negativo se o
+>   relógio recuar.
+> - **`observeConversation`:** abertura nova com `openedAt`/`clientSince`/`updatedAt` corretos; atualização da
+>   mesma conversa sem regredir `openedAt`; `clientSince` gravado só na primeira mensagem do cliente; zerado
+>   quando o vendedor responde; bot/sistema não mexem na espera; `messageCount` e rótulo não regridem; e o
+>   fallback do rótulo para a própria `key`.
+> - **`attachReview`/`attachCoaching`:** sinal anexado à conversa certa, `reviewCount` incrementado só pela
+>   revisão (coaching não conta), criação de registro mínimo quando a conversa ainda não foi observada e os
+>   dois sinais convivendo na mesma conversa.
+> - **Virada de dia:** `emptyDay` de datas distintas mantém `date` e estado independentes; o dia seguinte
+>   recomeça do zero para a mesma conversa.
+> - **Verificação:** `vitest run tests/tracking.test.ts` → **33/33**; suíte completa `vitest run` → **132/132**
+>   (eram 109 antes, +23). `tsc --noEmit` mantém **apenas** o erro pré-existente de
+>   `src/contents/companion.tsx:110` (`sendToBackground` tipa a resposta como `never`), que a última tarefa da
+>   fase resolve — não é escopo desta tarefa.
+> - **Nota de ambiente:** `pnpm` não está no PATH deste shell; os binários foram rodados por `./node_modules/.bin/`.
 
 - [ ] Rodar `pnpm test` e `pnpm typecheck`, corrigir todas as falhas e, se algum teste antigo quebrar por causa do novo hook/componente, ajustar sem afrouxar a cobertura existente.
