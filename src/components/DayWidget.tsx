@@ -1,3 +1,4 @@
+import { sendToBackground } from "@plasmohq/messaging"
 import {
   useEffect,
   useRef,
@@ -8,10 +9,24 @@ import {
 
 import type { ChatAdapter } from "~adapters/types"
 import { Wordmark } from "~components/Brand"
+import { CostPanel } from "~components/CostPanel"
+import { Spinner } from "~components/Spinner"
 import { useDayTracking } from "~hooks/useDayTracking"
+import type { CostInfo } from "~lib/ai/cost"
+import { config as appConfig } from "~lib/config"
 import { WAIT_CHIP, WAIT_ROW } from "~lib/labels"
+import {
+  GENERATE_REPORT,
+  OPEN_REPORT,
+  type GenerateReportRequest,
+  type GenerateReportResponse,
+  type OpenReportRequest,
+  type OpenReportResponse
+} from "~lib/messages"
+import { saveReport } from "~lib/report/storage"
 import { formatDayLabel, formatDuration, formatWait } from "~lib/tracking/format"
 import { waitElapsed, waitLevel } from "~lib/tracking/level"
+import { buildReportInput } from "~lib/tracking/report"
 import {
   DEFAULT_WIDGET_POSITION,
   loadWidgetPosition,
@@ -91,6 +106,29 @@ const ConversationRow = ({
   )
 }
 
+/** Estado do botão "Encerrar o dia": ocioso, gerando, com erro da IA ou com o relatório pronto. */
+type FinishState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "error"; message: string }
+  | { kind: "done"; date: string; cost?: CostInfo; openFailed: boolean }
+
+/**
+ * Pede ao background para abrir a página do relatório em uma nova aba. `false` quando a aba não
+ * pôde ser aberta — o relatório já está salvo e continua alcançável pelo ícone/página da extensão.
+ */
+const openReportPage = async (date: string): Promise<boolean> => {
+  try {
+    const response = await sendToBackground<OpenReportRequest, OpenReportResponse>({
+      name: OPEN_REPORT,
+      body: { date }
+    })
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
 interface Props {
   adapter: ChatAdapter | null
 }
@@ -98,6 +136,7 @@ interface Props {
 export const DayWidget = ({ adapter }: Props) => {
   const { day, conversations, now, summary, attention, alertCount } = useDayTracking(adapter)
   const [position, setPosition] = useState<WidgetPosition>(DEFAULT_WIDGET_POSITION)
+  const [finish, setFinish] = useState<FinishState>({ kind: "idle" })
   const rootRef = useRef<HTMLDivElement>(null)
   const positionRef = useRef(position)
   const dragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null)
@@ -173,6 +212,53 @@ export const DayWidget = ({ adapter }: Props) => {
   if (position.left !== undefined) style.left = position.left
   else style.right = position.right ?? DEFAULT_WIDGET_POSITION.right
 
+  // `buildReportInput` descarta conversas sem nenhuma mensagem (registro mínimo criado por um sinal
+  // de IA antes do primeiro tick); se nenhuma sobrar, o relatório sairia vazio, então o botão fica
+  // desabilitado com a dica no `title` em vez de gastar uma chamada de IA à toa.
+  const canFinishDay = buildReportInput(day, now).conversations.length > 0
+  const finishBusy = finish.kind === "loading"
+
+  /**
+   * Gera o relatório do dia (no background, nunca no content script), guarda-o no storage e abre a
+   * página em uma nova aba. Estados visíveis no próprio widget: "gerando", erro da IA e sucesso.
+   */
+  const finishDay = async () => {
+    if (finishBusy || !canFinishDay) return
+    const input = buildReportInput(day, Date.now())
+    setFinish({ kind: "loading" })
+    let response: GenerateReportResponse
+    try {
+      response = await sendToBackground<GenerateReportRequest, GenerateReportResponse>({
+        name: GENERATE_REPORT,
+        body: { report: input }
+      })
+    } catch {
+      // Acontece quando a extensão é recarregada com a página aberta.
+      setFinish({
+        kind: "error",
+        message: "A extensão foi atualizada. Recarregue a página do Botconversa."
+      })
+      return
+    }
+    if (!response.ok) {
+      // A mensagem do `AiResult` já é legível; o botão volta a ficar disponível para nova tentativa.
+      setFinish({ kind: "error", message: response.error })
+      return
+    }
+    const generatedAt = Date.now()
+    // Guardar antes de abrir: a página lê o relatório do storage pela data do `?date=`.
+    await saveReport(input.date, {
+      date: input.date,
+      generatedAt,
+      model: response.meta.model,
+      promptVersion: response.meta.promptVersion,
+      report: response.data,
+      input
+    })
+    const opened = await openReportPage(input.date)
+    setFinish({ kind: "done", date: input.date, cost: response.meta.cost, openFailed: !opened })
+  }
+
   return (
     <div
       ref={rootRef}
@@ -243,6 +329,43 @@ export const DayWidget = ({ adapter }: Props) => {
               )}
             </div>
           )}
+
+          <div className="space-y-2 border-t border-line px-2.5 py-2">
+            <button
+              type="button"
+              onClick={finishDay}
+              disabled={finishBusy || !canFinishDay}
+              aria-busy={finishBusy || undefined}
+              title={
+                canFinishDay
+                  ? "Gerar o relatório do dia com a IA e abrir a página"
+                  : "Nenhuma conversa com mensagem foi acompanhada hoje"
+              }
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white transition hover:bg-brand-dark focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted disabled:text-fg-subtle">
+              {finishBusy && <Spinner className="h-3.5 w-3.5" />}
+              {finishBusy ? "Gerando relatório…" : "Encerrar o dia"}
+            </button>
+
+            {finish.kind === "error" && (
+              <p
+                role="alert"
+                className="rounded-md bg-rose-50 px-2.5 py-2 text-[11px] text-rose-800 dark:bg-rose-500/15 dark:text-rose-200">
+                {finish.message}
+              </p>
+            )}
+
+            {finish.kind === "done" && (
+              <p className="text-[11px] text-fg-subtle" aria-live="polite">
+                {finish.openFailed
+                  ? `Relatório de ${formatDayLabel(finish.date)} salvo, mas a página não abriu.`
+                  : `Relatório de ${formatDayLabel(finish.date)} aberto em uma nova aba.`}
+              </p>
+            )}
+
+            {appConfig.showCosts && finish.kind === "done" && finish.cost && (
+              <CostPanel cost={finish.cost} />
+            )}
+          </div>
         </>
       )}
     </div>

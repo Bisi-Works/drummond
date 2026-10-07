@@ -40,3 +40,20 @@ export interface GenerateReportRequest {
 }
 
 export type GenerateReportResponse = AiResult<DailyReport>
+
+// Abrir a página do relatório também passa pelo background: `chrome.tabs` não existe no content
+// script (o widget roda no shadow DOM da página do Botconversa), então o widget só manda a data e
+// o background abre a aba. Sem essa rota, o botão "Encerrar o dia" não teria como levar o vendedor
+// até `tabs/report.html`.
+export const OPEN_REPORT = "open-report"
+
+export interface OpenReportRequest {
+  /** Data YYYY-MM-DD do relatório a abrir; fora do formato, cai para a página sem `?date=`. */
+  date: string
+}
+
+export interface OpenReportResponse {
+  ok: boolean
+  /** Motivo quando `ok` é falso (ex.: o navegador recusou abrir a aba). */
+  error?: string
+}

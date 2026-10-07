@@ -13,5 +13,6 @@ declare module "@plasmohq/messaging" {
   interface MessagesMetadata {
     "review-draft": {}
     "generate-report": {}
+    "open-report": {}
   }
 }
