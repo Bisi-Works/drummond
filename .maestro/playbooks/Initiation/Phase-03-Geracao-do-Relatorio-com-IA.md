@@ -60,10 +60,15 @@ passam.
 > **Dia sem conteúdo:** como `buildReportInput` (Fase 03, checkbox anterior) já filtra as conversas sem mensagem, uma lista `conversations` vazia é exatamente o caso "nada a avaliar": devolve `{ resumo: "Nenhuma conversa com mensagens foi acompanhada neste dia.", acertos: [], erros: [], melhorias: [], pendencias: [] }` **sem chamar o modelo**, mesma estratégia do `coachConversation` sem mensagens do vendedor. O `import type { DailyReportInput }` é só de tipo e o módulo `~lib/tracking/report` é puro (sem `chrome`/IA), então não muda o bundle.
 > A cobertura permanente do motor fica no `tests/daily-report.test.ts` (checkbox próprio desta fase), para não duplicar testes. **Verificação:** `./node_modules/.bin/tsc --noEmit` → **exit 0** e `./node_modules/.bin/vitest run` → **184/184** (13 arquivos, nenhum teste tocado).
 
-- [ ] Criar o canal de mensagem do background para o relatório:
+- [x] Criar o canal de mensagem do background para o relatório:
   - Em `src/lib/messages.ts`, adicionar `GENERATE_REPORT = "generate-report"` e os tipos `GenerateReportRequest`/`GenerateReportResponse` (reaproveitando `AiResult<DailyReport>`), seguindo o padrão de `COACH_PORT`/`GET_CONVERSATION`.
   - Criar `src/background/messages/generate-report.ts` no padrão de `src/background/messages/review-draft.ts`, lendo `req.body` e respondendo `await generateDailyReport(...)`.
   - Não chamar a IA de dentro do content script: a requisição sai sempre do background, como já acontece na revisão e no coaching.
+
+> **Canal de mensagem do relatório criado (2026-10-07).** Em `src/lib/messages.ts`, `GENERATE_REPORT = "generate-report"` (mensagem simples, não port — diferente do coaching, o relatório não faz streaming), com `GenerateReportRequest = { report: DailyReportInput }` e `GenerateReportResponse = AiResult<DailyReport>`; os tipos `DailyReport` e `DailyReportInput` vieram por `import type`, sem arrastar runtime. O payload é o mesmo `DailyReportInput` que o `generateDailyReport` já consome, então o envelope de `AiMeta`/custo atravessa o messaging igual ao da revisão.
+> `src/background/messages/generate-report.ts` (novo) segue o `review-draft.ts`: handler `PlasmoMessaging.MessageHandler<GenerateReportRequest, GenerateReportResponse>` lendo `req.body` e respondendo `await generateDailyReport(report)`. O Plasmo registra a rota sozinho a partir do nome do arquivo; `src/background/index.ts` não precisou mudar (só importa o `coach-port`, que é um listener de conexão). Se `req.body` chegar vazio, o `undefined` cai no `try/catch` do `run` do serviço e volta como `{ ok: false, error }`, sem derrubar o handler.
+> A rota também entrou em `src/types/plasmo-messaging.d.ts` (`"generate-report": {}`): o comentário do próprio arquivo explica que `.plasmo/messaging.d.ts` só é gerado no `plasmo dev/build`, então sem essa declaração um clone limpo teria `MessageName` = `never` e o `pnpm typecheck` acusaria o `sendToBackground` futuro.
+> **Verificação:** `./node_modules/.bin/tsc --noEmit` → **exit 0** e `./node_modules/.bin/vitest run` → **184/184** (13 arquivos; nenhum teste novo aqui — a cobertura do motor fica no `tests/daily-report.test.ts`, no checkbox seguinte).
 
 - [ ] Escrever `tests/daily-report.test.ts` cobrindo o motor sem rede:
   - `limitDailyReport` truncando listas longas em `MAX_REPORT_ITEMS`.

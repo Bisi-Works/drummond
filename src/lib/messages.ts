@@ -1,6 +1,7 @@
 import type { ChatMessage } from "~adapters/types"
-import type { CoachingReport } from "~lib/ai/schemas"
+import type { CoachingReport, DailyReport } from "~lib/ai/schemas"
 import type { AiResult } from "~lib/ai/service"
+import type { DailyReportInput } from "~lib/tracking/report"
 
 // Mensagem enviada do side panel para o content script da aba ativa. As mensagens para o
 // background ficam em src/background/messages (convenção do @plasmohq/messaging).
@@ -28,3 +29,14 @@ export type CoachPortMessage =
   | { type: "delta"; text: string }
   /** Resultado final, validado — o mesmo formato da revisão. */
   | { type: "result"; response: CoachResponse }
+
+// O relatório do dia usa uma mensagem simples (como a revisão): o background recebe o resumo
+// compacto do tracking e devolve o relatório validado. A IA nunca é chamada do content script.
+export const GENERATE_REPORT = "generate-report"
+
+export interface GenerateReportRequest {
+  /** Payload compacto do dia (`buildReportInput`) — nunca as conversas completas. */
+  report: DailyReportInput
+}
+
+export type GenerateReportResponse = AiResult<DailyReport>
