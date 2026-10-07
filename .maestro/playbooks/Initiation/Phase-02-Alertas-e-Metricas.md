@@ -106,4 +106,6 @@ final da fase, `pnpm test` e `pnpm typecheck` passam e o painel lateral exibe o 
 >   - **`subscribeDay`:** evento de `chrome.storage.onChanged` na área `local` entrega o `DayLog` normalizado com a data extraída do sufixo da chave, ignora chaves que não são de dia e a área `sync`, e o `unsubscribe` remove o listener de verdade (e não quebra sem `chrome.storage.onChanged`).
 > - **`summarizeDay` (1 caso novo):** um dia aguardando (`2026-10-07`) e um respondido (`2026-10-08`) são agregados em separado — `conversations`/`waiting`/`answered` de um não contam o outro, e a `attentionQueue` de cada dia só vê a própria conversa (a do dia respondido fica vazia).
 
+> **Nota de ambiente (2026-10-07):** `pnpm` não está no PATH do shell do agente (`pnpm: command not found`). Os equivalentes usados nesta fase e que rodam são `./node_modules/.bin/vitest run` e `./node_modules/.bin/tsc --noEmit`.
+
 - [ ] Rodar `pnpm test` e `pnpm typecheck`, corrigir as falhas e confirmar que nenhum teste anterior foi enfraquecido.
