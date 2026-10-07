@@ -23,7 +23,13 @@ import {
   type OpenReportRequest,
   type OpenReportResponse
 } from "~lib/messages"
-import { saveReport } from "~lib/report/storage"
+import { loadReportGate, type ReportGateState } from "~lib/report/gate"
+import {
+  canGenerateReport,
+  clearReportGeneration,
+  markReportGenerated,
+  saveReport
+} from "~lib/report/storage"
 import { formatDayLabel, formatDuration, formatWait } from "~lib/tracking/format"
 import { waitElapsed, waitLevel } from "~lib/tracking/level"
 import { buildReportInput } from "~lib/tracking/report"
@@ -137,6 +143,8 @@ export const DayWidget = ({ adapter }: Props) => {
   const { day, conversations, now, summary, attention, alertCount } = useDayTracking(adapter)
   const [position, setPosition] = useState<WidgetPosition>(DEFAULT_WIDGET_POSITION)
   const [finish, setFinish] = useState<FinishState>({ kind: "idle" })
+  // Trava diária: em produção bloqueia a segunda geração; em dev/`reportUnlimited` fica liberada.
+  const [reportGate, setReportGate] = useState<ReportGateState>({ locked: false, stored: false })
   const rootRef = useRef<HTMLDivElement>(null)
   const positionRef = useRef(position)
   const dragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null)
@@ -156,6 +164,18 @@ export const DayWidget = ({ adapter }: Props) => {
       alive = false
     }
   }, [])
+
+  // Recarrega a trava quando o dia vira e quando uma geração termina (`finish`), para o botão
+  // refletir a cota consumida (em prod) e a existência de um relatório salvo para reabrir.
+  useEffect(() => {
+    let alive = true
+    void loadReportGate(day.date).then((gate) => {
+      if (alive) setReportGate(gate)
+    })
+    return () => {
+      alive = false
+    }
+  }, [day.date, finish])
 
   /** Atualiza o estado e grava a posição — o widget volta onde o vendedor o deixou. */
   const persist = (next: WidgetPosition) => {
@@ -225,6 +245,12 @@ export const DayWidget = ({ adapter }: Props) => {
   const finishDay = async () => {
     if (finishBusy || !canFinishDay) return
     const input = buildReportInput(day, Date.now())
+    // Checagem antes de gastar IA: a UI já desabilita o botão, mas o estado pode ter mudado (outra
+    // aba gerou o relatório) entre o render e o clique.
+    if (!(await canGenerateReport(input.date))) {
+      setReportGate((gate) => ({ ...gate, locked: true }))
+      return
+    }
     setFinish({ kind: "loading" })
     let response: GenerateReportResponse
     try {
@@ -242,6 +268,7 @@ export const DayWidget = ({ adapter }: Props) => {
     }
     if (!response.ok) {
       // A mensagem do `AiResult` já é legível; o botão volta a ficar disponível para nova tentativa.
+      // Nada é marcado aqui: falha da IA não consome a cota do dia.
       setFinish({ kind: "error", message: response.error })
       return
     }
@@ -255,8 +282,25 @@ export const DayWidget = ({ adapter }: Props) => {
       report: response.data,
       input
     })
+    // Só depois do `ok: true` (e do relatório salvo) a cota do dia é consumida.
+    await markReportGenerated(input.date, generatedAt)
     const opened = await openReportPage(input.date)
     setFinish({ kind: "done", date: input.date, cost: response.meta.cost, openFailed: !opened })
+  }
+
+  /** "Abrir relatório": leva à página do relatório já salvo do dia, sem gerar de novo. */
+  const openStored = async () => {
+    const opened = await openReportPage(day.date)
+    if (!opened) {
+      setFinish({ kind: "error", message: "Não foi possível abrir a página do relatório." })
+    }
+  }
+
+  /** Dev: limpa a marca do dia e gera de novo, para repetir os testes sem depender da cota. */
+  const regenerate = async () => {
+    await clearReportGeneration(day.date)
+    setReportGate((gate) => ({ ...gate, locked: false }))
+    await finishDay()
   }
 
   return (
@@ -334,17 +378,48 @@ export const DayWidget = ({ adapter }: Props) => {
             <button
               type="button"
               onClick={finishDay}
-              disabled={finishBusy || !canFinishDay}
+              disabled={finishBusy || !canFinishDay || reportGate.locked}
               aria-busy={finishBusy || undefined}
               title={
-                canFinishDay
-                  ? "Gerar o relatório do dia com a IA e abrir a página"
-                  : "Nenhuma conversa com mensagem foi acompanhada hoje"
+                reportGate.locked
+                  ? "A cota de um relatório por dia já foi usada hoje"
+                  : canFinishDay
+                    ? "Gerar o relatório do dia com a IA e abrir a página"
+                    : "Nenhuma conversa com mensagem foi acompanhada hoje"
               }
               className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white transition hover:bg-brand-dark focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted disabled:text-fg-subtle">
               {finishBusy && <Spinner className="h-3.5 w-3.5" />}
-              {finishBusy ? "Gerando relatório…" : "Encerrar o dia"}
+              {finishBusy
+                ? "Gerando relatório…"
+                : reportGate.locked
+                  ? "Relatório de hoje já gerado"
+                  : "Encerrar o dia"}
             </button>
+
+            {reportGate.locked && (
+              <p className="text-[11px] text-fg-subtle">
+                A cota de um relatório por dia já foi usada. Reabra o relatório de hoje abaixo.
+              </p>
+            )}
+
+            {reportGate.stored && (
+              <button
+                type="button"
+                onClick={() => void openStored()}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-xs font-medium text-fg transition hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
+                Abrir relatório
+              </button>
+            )}
+
+            {appConfig.showCosts && reportGate.stored && (
+              <button
+                type="button"
+                onClick={() => void regenerate()}
+                disabled={finishBusy}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-line bg-surface px-3 py-2 text-xs font-medium text-fg-muted transition hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed">
+                Gerar novamente (dev)
+              </button>
+            )}
 
             {finish.kind === "error" && (
               <p

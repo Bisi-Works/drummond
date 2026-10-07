@@ -14,11 +14,12 @@ risco de gasto descontrolado nem de tela quebrada quando algo falha.
   - Criar `canGenerateReport(date, now)` combinando a contagem com o limite, considerando `reportUnlimited` e a virada de dia via `dayKey` (um relatório gerado ontem não bloqueia hoje).
   - _Feito: storage com normalizador `toReportGeneration` (silencioso sem `chrome.storage`), `markReportGenerated` somando `count`; `canGenerateReport` libera no dev/past-unlimited e renova a cota quando `dayKey(now) !== date`. `.env.example` ganhou `PLASMO_PUBLIC_REPORT_LIMIT_PER_DAY` e `PLASMO_PUBLIC_REPORT_UNLIMITED` (default `false`). Coberto em `tests/report-storage.test.ts` (238 testes passando, `tsc --noEmit` limpo)._
 
-- [ ] Aplicar a trava no fluxo de geração do widget (`src/components/DayWidget.tsx`):
+- [x] Aplicar a trava no fluxo de geração do widget (`src/components/DayWidget.tsx`):
   - Antes de chamar o background, checar `canGenerateReport(date)`. Se bloqueado, não disparar request: mudar o botão para "Relatório de hoje já gerado" com uma ação secundária "Abrir relatório" (usa `saveReport`/`loadReport` da data para montar a URL da tab).
   - Só chamar `markReportGenerated` depois de um `ok: true`; falha da IA não consome a cota do dia.
   - Em dev (`config.showCosts`), mostrar um botão "Gerar novamente" que limpa a marca com `clearReportGeneration` para permitir repetir os testes.
   - Deixar claro no texto do widget quando a cota do dia foi usada, sem depender de diálogo do usuário.
+  - _Feito: novo helper `src/lib/report/gate.ts` (`loadReportGate` combina `canGenerateReport` + `loadReport`); o widget recarrega o gate na virada do dia e ao fim de cada geração. Em produção, cota usada desabilita "Encerrar o dia" (label "Relatório de hoje já gerado") com aviso e ação secundária "Abrir relatório"; em dev (`showCosts`) aparece "Gerar novamente", que chama `clearReportGeneration` e regera. `finishDay` checa `canGenerateReport` antes do request e só chama `markReportGenerated` após `ok: true` + `saveReport` (falha da IA não consome a cota). Coberto em `tests/report-gate.test.ts` (244 testes passando, `tsc --noEmit` limpo). Nota: `pnpm check:bundle` falha neste ambiente por ausência de `.env` (chave OpenRouter), condição pré-existente, tratada na tarefa de verificação final._
 
 - [ ] Endurecer os casos de borda do fluxo e da página:
   - Dia sem conversas: o botão fica desabilitado com dica; se por algum caminho a geração for chamada, o `generateDailyReport` devolve o relatório vazio local (sem request) e a página renderiza um estado coerente.
