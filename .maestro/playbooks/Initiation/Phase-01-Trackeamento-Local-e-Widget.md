@@ -128,4 +128,22 @@ aparece de verdade na página do Botconversa. Nenhuma decisão do usuário é ne
 >   fase resolve — não é escopo desta tarefa.
 > - **Nota de ambiente:** `pnpm` não está no PATH deste shell; os binários foram rodados por `./node_modules/.bin/`.
 
-- [ ] Rodar `pnpm test` e `pnpm typecheck`, corrigir todas as falhas e, se algum teste antigo quebrar por causa do novo hook/componente, ajustar sem afrouxar a cobertura existente.
+- [x] Rodar `pnpm test` e `pnpm typecheck`, corrigir todas as falhas e, se algum teste antigo quebrar por causa do novo hook/componente, ajustar sem afrouxar a cobertura existente.
+
+> **Suíte e typecheck verdes (2026-10-07).**
+> - **`pnpm test`** → **132/132** em 11 arquivos (nenhum teste antigo quebrou com o hook/componente novos; nenhum
+>   afrouxamento de cobertura foi necessário).
+> - **`pnpm typecheck`** → **exit 0**. O erro que vinha se arrastando desde o commit inicial (`src/contents/companion.tsx`:
+>   `sendToBackground` tipa `name` como `never`) foi resolvido na raiz, não silenciado: o Plasmo só gera o
+>   `.plasmo/messaging.d.ts` que declara `MessagesMetadata` ao rodar `plasmo dev`/`plasmo build`, e `.plasmo/` é
+>   gerado e ignorado pelo git — então num clone limpo o `MessageName` cai para `never` e o `pnpm typecheck` sempre
+>   falhava ali (inclusive em `pnpm verify`, que roda o typecheck **antes** da build).
+> - **Correção:** `src/types/plasmo-messaging.d.ts` (novo) declara `MessagesMetadata { "review-draft": {} }`, o
+>   mesmo formato `{}` que o Plasmo gera, então as duas declarações se fundem sem conflito quando a build roda
+>   (verificado recriando `.plasmo/index.d.ts` + `.plasmo/messaging.d.ts` + `.plasmo/process.env.d.ts` e rodando
+>   `tsc --noEmit`: exit 0). O arquivo fica fora de `src/background/messages/` de propósito — o Plasmo
+>   autodescobre rotas com um glob `**/*.ts` ali, e um `.d.ts` naquela pasta viraria uma rota quebrada.
+> - **Manutenção:** ao criar uma rota nova em `src/background/messages/`, o nome também entra em
+>   `src/types/plasmo-messaging.d.ts` (comentário no topo do arquivo e linha nova no "Onde ajustar" do README).
+> - **Comandos:** `pnpm` não está no PATH deste shell; rodei via `corepack pnpm test` / `corepack pnpm typecheck`
+>   (equivalentes aos scripts do `package.json`).

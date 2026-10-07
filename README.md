@@ -165,6 +165,7 @@ que não são texto do vendedor, com trecho inexistente ou sugestão igual ao or
 | Formato da resposta (JSON Schema + validação) | `src/lib/ai/schemas.ts` |
 | Seletores do Botconversa | `src/adapters/botconversa.ts` (e a fixture em `tests/fixtures/`) |
 | Nova plataforma de chat | novo adapter em `src/adapters/`, registrado em `adapters/index.ts` e no `matches` de `src/contents/companion.tsx` |
+| Nova rota de mensagem do background | arquivo em `src/background/messages/` **e** o nome da rota em `src/types/plasmo-messaging.d.ts` (o `.plasmo/messaging.d.ts` que o Plasmo gera é ignorado pelo git, e sem essa declaração o `pnpm typecheck` num clone limpo falha) |
 
 ### Se o Botconversa mudar a interface
 
