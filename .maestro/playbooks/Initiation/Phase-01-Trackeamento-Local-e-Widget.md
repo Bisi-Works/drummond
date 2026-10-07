@@ -22,11 +22,17 @@ aparece de verdade na página do Botconversa. Nenhuma decisão do usuário é ne
 > - **Testes:** `vitest.config.mts` (ambiente apenas de alias `~` → `src`; testes são `tests/**/*.test.ts`) e `tests/theme.test.ts` mostram o estilo: funções puras, `describe`/`it` em português, sem rede.
 > - **Sinais de IA a anexar:** `runReview` em `companion.tsx` recebe `ReviewDraftResponse`; o side panel conclui via `requestCoaching`, e `GetConversationResponse` já carrega `conversationKey` (hoje descartado no `sidepanel.tsx`).
 
-- [ ] Criar `src/lib/tracking/types.ts` e `src/lib/tracking/constants.ts` com o modelo do dia e as regras fixas de tempo de resposta:
+- [x] Criar `src/lib/tracking/types.ts` e `src/lib/tracking/constants.ts` com o modelo do dia e as regras fixas de tempo de resposta:
   - Tipos: `WaitLevel = "verde" | "amarelo" | "laranja" | "vermelho"`; `TrackedConversation` com `key`, `platform`, `label`, `openedAt`, `lastSeenAt`, `lastMessageAuthor: ChatAuthor | null`, `lastMessageText`, `lastMessageAt: number | null`, `clientSince: number | null`, `messageCount`, `reviewCount`, `lastReview?: { status, summary, at }`, `lastCoaching?: { summary, nextStep, at }`; `DayLog` com `date: string` (YYYY-MM-DD local), `conversations: Record<string, TrackedConversation>`, `updatedAt: number`.
   - Constantes: `WAIT_LIMITS_MS = { amarelo: 6*60_000, laranja: 12*60_000, vermelho: 18*60_000 }` (verde abaixo do primeiro limite; vermelho a partir do último, sem teto), `DAY_LOG_PREFIX = "drummond.dayLog."`, `WIDGET_POSITION_KEY = "drummond.widgetPosition"`, `WIDGET_POSITION_VERSION = 1`.
   - Funções puras exportadas aqui mesmo ou em `src/lib/tracking/level.ts`: `dayKey(at = new Date()): string` usando data LOCAL (não `toISOString`, que usa UTC e erra a virada de dia no Brasil); `waitLevel(elapsedMs: number): WaitLevel` com verde `<= 6min`, amarelo `<= 12min`, laranja `<= 18min`, vermelho acima de 18min; `waitElapsed(conversation, now)` retornando `null` quando a conversa não está aguardando.
   - Comentários curtos em português, no mesmo estilo do restante do projeto, explicando que `time` do adapter só traz "HH:MM" (com prefixo de dia) sem data e por isso o cálculo de espera se apoia em `clientSince`.
+
+> **Modelo do dia criado (2026-10-07).** `src/lib/tracking/types.ts`, `src/lib/tracking/constants.ts` e `src/lib/tracking/level.ts`:
+> - **Tipos** (`types.ts`): `WaitLevel`, `TrackedReviewSignal` (`status: "ok" | "ajustes"`, alinhado ao `DraftReview`), `TrackedCoachingSignal`, `TrackedConversation` e `DayLog` exatamente com os campos da tarefa. `lastMessageAt` é documentado como o epoch ms em que a mensagem foi observada (não o `time` do adapter, que não tem data).
+> - **Constantes** (`constants.ts`): `WAIT_LIMITS_MS` (6/12/18 min), `DAY_LOG_PREFIX`, `WIDGET_POSITION_KEY` e `WIDGET_POSITION_VERSION`.
+> - **Funções puras** (`level.ts`, opção prevista na tarefa): `dayKey` (data LOCAL, com `padStart`, sem `toISOString`), `waitLevel` (verde ≤ 6, amarelo ≤ 12, laranja ≤ 18, vermelho acima) e `waitElapsed` (`null` quando `clientSince` é `null`).
+> - **Verificação:** `pnpm test` → 99/99 passam. `pnpm typecheck` aponta **um erro pré-existente** em `src/contents/companion.tsx:104` (`sendToBackground` tipa a resposta como `never`), sem relação com os arquivos novos — fica para a última tarefa da fase, que pede o typecheck limpo.
 
 - [ ] Criar `src/lib/tracking/store.ts` com a persistência e os redutores puros do dia:
   - `loadDay(date = dayKey())`, `saveDay(day)`, `clearDay(date)` lendo/escrevendo `chrome.storage.local` na chave `${DAY_LOG_PREFIX}${date}`, com fallback silencioso (retorno de um `DayLog` vazio) quando `chrome?.storage` não existir ou a leitura falhar — o content script pode rodar com a extensão recém-recarregada.
