@@ -84,4 +84,10 @@ passam.
 > - **`generateDailyReport`:** confere modelo/`response_format` (`daily_report`)/ordem de provedores sem `stream` e que o dia chega como `<dia>` no `messages[1]`; valida o relatório devolvido, trunca listas longas do modelo, falha com `ok: false` para JSON ausente e para seção faltando, e devolve o relatório vazio coerente **sem chamar o modelo** quando `conversations` está vazio.
 > **Verificação:** `./node_modules/.bin/vitest run` → **205/205** (14 arquivos; +21 neste arquivo) e `./node_modules/.bin/tsc --noEmit` → **exit 0**. O `pnpm test`/`pnpm typecheck` formal e a reconferência pós-bump de `PROMPT_VERSION` ficam no checkbox seguinte.
 
-- [ ] Rodar `pnpm test` e `pnpm typecheck`, corrigir as falhas e confirmar que os testes de prompts/serviço existentes continuam passando após o bump de `PROMPT_VERSION`.
+- [x] Rodar `pnpm test` e `pnpm typecheck`, corrigir as falhas e confirmar que os testes de prompts/serviço existentes continuam passando após o bump de `PROMPT_VERSION`.
+
+> **Suíte completa e typecheck verdes (2026-10-07).** Nesta máquina o `pnpm` não está no `PATH` do shell do agente, então os dois scripts do `package.json` foram executados pelo shim do Corepack (`corepack pnpm test` / `corepack pnpm typecheck`) — os mesmos comandos, sem atalho manual para `vitest`/`tsc`, para que o resultado seja o do script real.
+> - `pnpm test` (`vitest run`) → **205/205 testes, 14 arquivos, 0 falhas** (~4,9 s).
+> - `pnpm typecheck` (`tsc --noEmit`) → **exit 0**, sem erros.
+> - Reconferência pós-bump de `PROMPT_VERSION` (`2026-10-01.1` → `2026-10-07.1`, tarefa do prompt): `vitest run tests/prompts.test.ts tests/service.test.ts tests/daily-report.test.ts` → **72/72** passando, confirmando que os testes existentes de prompts/serviço não regrediram com o bump e que o novo motor do relatório está coberto. Nenhuma correção foi necessária — todos os checkboxes anteriores desta fase já tinham validado cada módulo isoladamente, e a integração fechou sem ajustes.
+> **Verificação:** `corepack pnpm test` → **205/205** e `corepack pnpm typecheck` → **exit 0**. A árvore de trabalho estava limpa antes deste check, então esta tarefa é de verificação: o único arquivo alterado é este documento (marcação do checkbox), sem mudança de código.
