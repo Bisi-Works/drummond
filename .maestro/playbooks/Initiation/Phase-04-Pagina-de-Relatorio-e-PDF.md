@@ -14,10 +14,13 @@ página externa → PDF — funciona de ponta a ponta.
   - `saveReport(date, report)`, `loadReport(date)`, `listReportDates()`, `loadLatestReportRef()` com fallback silencioso quando `chrome?.storage` não existir, seguindo o padrão de `src/lib/tracking/store.ts`.
   - Tipo `StoredReport = { date: string; generatedAt: number; model: string; promptVersion: string; report: DailyReport; input: DailyReportInput }` — guardar também o input permite reabrir a página depois sem nova chamada de IA.
 
-- [ ] Criar `src/lib/report/format.ts` com helpers puros usados pela página e pelos testes:
+- [x] Criar `src/lib/report/format.ts` com helpers puros usados pela página e pelos testes:
   - `reportFileName(date)` (ex.: `drummond-relatorio-2026-10-02.html`), `formatDayLabel(date)` (ex.: "02/10/2026") e `formatDuration(ms)` legível ("2 min", "1 h 05").
   - `buildStandaloneHtml(stored: StoredReport): string` que gera um documento HTML completo e autocontido (CSS embutido, sem dependência do bundle) a partir do mesmo conteúdo da seção do relatório — usado no download `.html`. Manter a marca e as cores (`#e7191f`, preto, branco) do projeto.
   - `escapeHtml(text)` para todo texto vindo do modelo/das conversas, evitando que conteúdo do cliente quebre o HTML.
+
+> **Formatos fixados (2026-10-07):** `formatDuration` devolve `"45 s"` / `"2 min"` / `"1 h 05"` (minutos com dois dígitos quando há hora; hora cheia sem resto vira `"1 h"`), ou seja, um formato compacto diferente do `formatDuration` de `~lib/tracking/format` (`"1 h 5 min"`), que o widget/painel continua usando. `formatDayLabel` é **reexportado** de `~lib/tracking/format` (mesmo rótulo nas duas telas), e `reportFileName` é `drummond-relatorio-<YYYY-MM-DD>.html`.
+> Além dos três helpers, o módulo exporta `REPORT_LIST_SECTIONS`, `reportSections(report)` e `reportMetrics(input)` para a página e o HTML autocontido montarem as mesmas seções sem duplicar títulos ("Resumo geral", "Acertos", "Erros / padrões a evitar", "Melhorias", "Pendências para amanhã", "Métricas do dia"). `buildStandaloneHtml` traz a marca "Drummond by BW", as cores `#e7191f`/preto/branco e um `@media print` com página A4. Verificado com `tsc --noEmit` limpo e a suíte existente (217/217) verde; os testes próprios ficam na tarefa `tests/report-format.test.ts` mais abaixo.
 
 - [ ] Criar a página da extensão `src/tabs/report.tsx` (convenção de tabs do Plasmo, acessível em `tabs/report.html`):
   - Ler a data do `location.search` (`?date=YYYY-MM-DD`); sem data, cair para `loadLatestReportRef()` e, se não houver, mostrar um estado vazio explicando como gerar o relatório no widget.
