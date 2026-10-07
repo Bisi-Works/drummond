@@ -1,3 +1,5 @@
+import type { ChatMessage } from "~adapters/types"
+
 import { WAIT_LIMITS_MS } from "./constants"
 import type { TrackedConversation, WaitLevel } from "./types"
 
@@ -32,3 +34,19 @@ export const waitLevel = (elapsedMs: number): WaitLevel => {
  */
 export const waitElapsed = (conversation: TrackedConversation, now: number): number | null =>
   conversation.clientSince === null ? null : Math.max(0, now - conversation.clientSince)
+
+/** Tamanho máximo do rótulo exibido no widget (o cabeçalho é estreito). */
+const LABEL_MAX = 40
+
+/**
+ * Rótulo curto da conversa para o widget, derivado do que a extensão já carregou — sem mapear
+ * nenhum seletor novo do Botconversa (o nome do contato fica no cabeçalho, que esta fase não lê).
+ * Usa o início da primeira mensagem do cliente; sem texto nenhum, cai para a própria `key`
+ * (ex.: o `chat_id` da URL).
+ */
+export const conversationLabel = (messages: ChatMessage[], key: string): string => {
+  const first = messages.find((m) => m.author === "cliente" && m.text.trim())
+  const snippet = (first?.text ?? "").trim().split("\n")[0].replace(/\s+/g, " ")
+  if (!snippet) return key
+  return snippet.length > LABEL_MAX ? `${snippet.slice(0, LABEL_MAX - 1)}…` : snippet
+}
