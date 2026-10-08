@@ -1,4 +1,5 @@
 import type { DailyReport } from "~lib/ai/schemas"
+import { localArea } from "~lib/chrome-storage"
 import { config } from "~lib/config"
 import { dayKey } from "~lib/tracking/level"
 import type { DailyReportInput } from "~lib/tracking/report"
@@ -52,15 +53,6 @@ export interface StoredReport {
 export interface ReportRef {
   date: string
   generatedAt: number
-}
-
-/** `chrome.storage.local` quando existe; `null` quando não há extensão/storage disponível. */
-const localArea = (): chrome.storage.LocalStorageArea | null => {
-  try {
-    return typeof chrome !== "undefined" ? (chrome.storage?.local ?? null) : null
-  } catch {
-    return null
-  }
 }
 
 /** Chave completa de um relatório a partir da data. */
@@ -135,19 +127,23 @@ export const toStoredReport = (value: unknown, date: string): StoredReport | nul
 /**
  * Grava o relatório da data pedida e atualiza o ponteiro `latest` na mesma operação. A `date`
  * explícita manda (o `report` internamente também guarda a sua), então a chave nunca fica
- * inconsistente com o conteúdo. Silencioso sem storage.
+ * inconsistente com o conteúdo. Devolve `false` (sem lançar) quando o storage não existe ou a
+ * gravação falha — assim quem chamou não marca a cota nem abre a página de um relatório que não
+ * foi persistido.
  */
-export const saveReport = async (date: string, report: StoredReport): Promise<void> => {
+export const saveReport = async (date: string, report: StoredReport): Promise<boolean> => {
   const area = localArea()
-  if (!area) return
+  if (!area) return false
   const stored: StoredReport = { ...report, date }
   try {
     await area.set({
       [reportKey(date)]: stored,
       [REPORT_LATEST_KEY]: { date, generatedAt: stored.generatedAt } satisfies ReportRef
     })
+    return true
   } catch {
     // Sem storage (extensão recarregada): o relatório daquela sessão segue só em memória.
+    return false
   }
 }
 

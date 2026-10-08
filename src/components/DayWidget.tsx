@@ -274,7 +274,7 @@ export const DayWidget = ({ adapter }: Props) => {
     }
     const generatedAt = Date.now()
     // Guardar antes de abrir: a página lê o relatório do storage pela data do `?date=`.
-    await saveReport(input.date, {
+    const saved = await saveReport(input.date, {
       date: input.date,
       generatedAt,
       model: response.meta.model,
@@ -282,6 +282,16 @@ export const DayWidget = ({ adapter }: Props) => {
       report: response.data,
       input
     })
+    // Sem gravação (extensão recarregada/`chrome.storage` indisponível) não há o que a página
+    // abriria: avisa e para aqui, sem abrir uma aba vazia nem consumir a cota do dia.
+    if (!saved) {
+      setFinish({
+        kind: "error",
+        message:
+          "O relatório foi gerado, mas não foi possível salvá-lo neste navegador. Recarregue a página do Botconversa e gere de novo."
+      })
+      return
+    }
     // Só depois do `ok: true` (e do relatório salvo) a cota do dia é consumida.
     await markReportGenerated(input.date, generatedAt)
     const opened = await openReportPage(input.date)

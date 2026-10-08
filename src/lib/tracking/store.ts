@@ -1,4 +1,5 @@
 import type { ChatAuthor } from "~adapters/types"
+import { localArea, storageChanges } from "~lib/chrome-storage"
 
 import { DAY_LOG_PREFIX, WIDGET_POSITION_KEY, WIDGET_POSITION_VERSION } from "./constants"
 import { dayKey } from "./level"
@@ -45,19 +46,6 @@ export const DEFAULT_WIDGET_POSITION: WidgetPosition = { top: 64, right: 16, min
 
 /** Notificado a cada gravação de um dia em `chrome.storage.local` (inclusive de outra aba). */
 export type DayChangeListener = (day: DayLog, date: string) => void
-
-/**
- * `chrome.storage.local` quando existe; `null` quando a extensão foi recarregada com a página
- * aberta (o content script continua rodando, mas perde o `chrome.storage`). Quem chama trata o
- * `null` como "sem storage" e segue com um dia vazio.
- */
-const localArea = (): chrome.storage.LocalStorageArea | null => {
-  try {
-    return typeof chrome !== "undefined" ? (chrome.storage?.local ?? null) : null
-  } catch {
-    return null
-  }
-}
 
 /** Número finito (não `NaN`/`Infinity`); registros parciais do storage podem trazer qualquer valor. */
 const isFiniteNumber = (value: unknown): value is number =>
@@ -325,12 +313,7 @@ export const recordCoaching = async (key: string, signal: TrackedCoachingSignal)
  * mantém widget e painel coerentes. Devolve a função para cancelar a escuta.
  */
 export const subscribeDay = (onChange: DayChangeListener): (() => void) => {
-  let onChanged: typeof chrome.storage.onChanged | null = null
-  try {
-    onChanged = typeof chrome !== "undefined" ? (chrome.storage?.onChanged ?? null) : null
-  } catch {
-    onChanged = null
-  }
+  const onChanged = storageChanges()
   if (!onChanged) return () => {}
 
   const listener = (

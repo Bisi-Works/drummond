@@ -157,10 +157,17 @@ describe("saveReport / loadReport", () => {
     await expect(loadReport("2026-10-07")).resolves.toBeNull()
   })
 
-  it("não lança quando a gravação falha", async () => {
+  it("devolve true quando grava e false quando não há como gravar", async () => {
     const chrome = installChrome()
+    await expect(saveReport("2026-10-07", stored())).resolves.toBe(true)
+
+    // Sem storage (extensão recarregada): o widget usa isso para não abrir uma aba vazia.
+    Reflect.deleteProperty(globalThis, "chrome")
+    await expect(saveReport("2026-10-07", stored())).resolves.toBe(false)
+
+    // Com storage, mas com a gravação falhando, também não dá para abrir a página.
     chrome.breakWrites()
-    await expect(saveReport("2026-10-07", stored())).resolves.toBeUndefined()
+    await expect(saveReport("2026-10-07", stored())).resolves.toBe(false)
   })
 })
 
@@ -251,6 +258,17 @@ describe("trava diária do relatório", () => {
       generatedAt: NOW + 1_000,
       count: 2
     })
+  })
+
+  it("renova a cota quando o dia local já virou, mesmo para a data antiga", async () => {
+    installChrome()
+    await markReportGenerated("2026-10-07", NOW)
+
+    // Ainda no dia 07: bloqueado. Já no dia 08, a marca do 07 não trava mais nada.
+    await expect(canGenerateReport("2026-10-07", NOW)).resolves.toBe(false)
+    await expect(
+      canGenerateReport("2026-10-07", new Date(2026, 9, 8, 0, 5).getTime())
+    ).resolves.toBe(true)
   })
 
   it("libera quando reportUnlimited", async () => {
