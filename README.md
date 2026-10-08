@@ -99,10 +99,14 @@ typecheck, build e a checagem). A build de produção do Plasmo pode quebrar có
 no `pnpm dev`: o tree-shaking do Parcel e o SWC antigo já descartaram o zod e corromperam uma
 regex. Por isso a checagem não só compila, ela **executa** os bundles em um navegador simulado:
 service worker (com OpenRouter falso, inclusive o streaming, e as rotas `review-draft` e
-`generate-report`), content script (com a fixture do Botconversa) e side panel (com o relatório
-chegando aos pedaços). Ela também confere que a chave só está no background e que o bundle do
-content script referencia as rotas `generate-report`/`open-report`. O modelo ativo e a versão do
-prompt aparecem no rodapé do card e do painel.
+`generate-report`), content script (com a fixture do Botconversa), side panel (com o relatório
+chegando aos pedaços) e a página `tabs/report.html` (estado vazio e relatório salvo). Entre as
+garantias que ela confere: a chave só está no background; o bundle do content script referencia as
+rotas `generate-report`/`open-report`; o relatório não leva custo e a busca de preços não roda em
+produção (nem na resposta do coaching), mas o custo aparece no dev; e a trava diária — com a cota
+do dia consumida no `chrome.storage`, o widget de produção mostra "Relatório de hoje já gerado" e
+o de dev continua liberado ("Encerrar o dia"). O modelo ativo e a versão do prompt aparecem no
+rodapé do card e do painel.
 
 **Provedores.** O mesmo modelo roda em vários provedores, com preço e velocidade bem diferentes.
 Sem orientação, o OpenRouter prioriza os mais baratos. Para o DeepSeek V4 Flash, o mais barato
