@@ -29,6 +29,11 @@ cabeçalho do painel lateral troca para o claro, e a escolha vale também para o
   widget (acompanhadas, aguardando, respondidas, revisões, coachings e médias) e a fila de atenção
   com chips coloridos e tempo de espera. Lê o mesmo `chrome.storage.local`, então widget e painel
   ficam coerentes entre abas; sem conversas no dia, mostra "Nenhuma conversa acompanhada hoje".
+- **Relatório diário**: o botão **Encerrar o dia** do widget resume o que o tracking acumulou
+  (chats abertos, tempos de espera, revisões e coachings) e pede ao modelo um relatório do dia.
+  O resultado abre em uma página própria da extensão (`tabs/report.html`), de onde o vendedor o
+  leva embora como **PDF** (Imprimir → Salvar em PDF, layout A4), **HTML autocontido** ou cópia do
+  JSON. Em produção cada vendedor gera **um por dia**; no dev a trava fica livre para testes.
 
 Stack: [Plasmo](https://docs.plasmo.com/) (React + TypeScript), Tailwind CSS 3 e OpenRouter.
 
@@ -166,6 +171,28 @@ coaching ainda é subjetivo em condução (por exemplo, cobrar prazo de quem diz
 analisando"). O filtro `dropInvalidImprovements` (`service.ts`) descarta melhorias sobre mensagens
 que não são texto do vendedor, com trecho inexistente ou sugestão igual ao original.
 
+## Relatório diário
+
+Ao fim do dia, o widget mostra **Encerrar o dia**: ele resume o que o tracking local já acumulou
+(chats abertos, tempos de espera, revisões e coachings anexados) e pede ao modelo um relatório do
+dia. O resultado abre em uma **página própria da extensão** (`tabs/report.html`), com o tema da
+extensão e layout de impressão A4, e sai dali como PDF, HTML autocontido ou JSON.
+
+- A conversa completa nunca vai para a IA: o payload é um resumo compacto por conversa (a última
+  mensagem truncada + os sinais já registrados), então o relatório roda uma vez por dia sobre dados
+  que a extensão já tinha em mãos.
+- **Trava de 1 relatório por dia** em produção, por vendedor. Depois de gerado com sucesso, o botão
+  vira "Abrir relatório"; a falha da IA não consome a cota. Em `pnpm dev` a trava fica livre e,
+  com `config.showCosts`, aparece o botão "Gerar novamente".
+- No dev, a página mostra o bloco "Custo desta geração · dev" (estimativa antes da chamada e valor
+  efetivo devolvido pelo OpenRouter); na build de produção esse bloco não existe.
+- Variáveis novas: `PLASMO_PUBLIC_REPORT_LIMIT_PER_DAY` (quantos por dia, padrão `1`) e
+  `PLASMO_PUBLIC_REPORT_UNLIMITED` (ignora a trava; só para homologação, porque em dev ela já é
+  livre). A tarefa de relatório tem as suas próprias `PLASMO_PUBLIC_REPORT_*` (modelo, temperatura
+  etc.), como a revisão e o coaching.
+
+A arquitetura do tracking e do relatório está em `docs/architecture/`.
+
 ## Onde ajustar
 
 | O quê | Arquivo |
@@ -177,6 +204,11 @@ que não são texto do vendedor, com trecho inexistente ou sugestão igual ao or
 | Seletores do Botconversa | `src/adapters/botconversa.ts` (e a fixture em `tests/fixtures/`) |
 | Nova plataforma de chat | novo adapter em `src/adapters/`, registrado em `adapters/index.ts` e no `matches` de `src/contents/companion.tsx` |
 | Nova rota de mensagem do background | arquivo em `src/background/messages/` **e** o nome da rota em `src/types/plasmo-messaging.d.ts` (o `.plasmo/messaging.d.ts` que o Plasmo gera é ignorado pelo git, e sem essa declaração o `pnpm typecheck` num clone limpo falha). Não há registro manual no `src/background/index.ts`: o Plasmo descobre as rotas pelo nome do arquivo |
+| Tracking local do dia (estado, semáforo, resumo, payload da IA) | `src/lib/tracking/` (`store.ts`, `level.ts`, `summary.ts`, `report.ts`) |
+| Relatório diário (trava, storage, custo, montagem do texto) | `src/lib/report/` (`gate.ts`, `storage.ts`, `format.ts`) |
+| Página do relatório e exportação em PDF/HTML/JSON | `src/tabs/report.tsx` |
+| Widget flutuante e resumo do painel | `src/components/DayWidget.tsx` e `src/components/DayOverview.tsx` |
+| Arquitetura do tracking e do relatório | `docs/architecture/` |
 
 ### Se o Botconversa mudar a interface
 
