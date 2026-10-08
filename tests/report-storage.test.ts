@@ -248,6 +248,23 @@ describe("listReportDates", () => {
   it("devolve lista vazia sem storage", async () => {
     await expect(listReportDates()).resolves.toEqual([])
   })
+
+  it("faz round-trip de várias datas e uma data nunca gravada devolve null", async () => {
+    const chrome = installChrome()
+    await saveReport("2026-10-06", stored({ date: "2026-10-06", generatedAt: 1_000 }))
+    await saveReport("2026-10-07", stored({ date: "2026-10-07", generatedAt: 2_000 }))
+
+    await expect(listReportDates()).resolves.toEqual(["2026-10-07", "2026-10-06"])
+    await expect(loadReport("2026-10-07")).resolves.toEqual(
+      stored({ date: "2026-10-07", generatedAt: 2_000 })
+    )
+    await expect(loadReport("2026-10-05")).resolves.toBeNull()
+
+    // A trava diária usa o próprio prefixo e não deve aparecer como data de relatório.
+    await markReportGenerated("2026-10-07", NOW)
+    expect(chrome.data.has(`${REPORT_GENERATED_PREFIX}2026-10-07`)).toBe(true)
+    await expect(listReportDates()).resolves.toEqual(["2026-10-07", "2026-10-06"])
+  })
 })
 
 describe("trava diária do relatório", () => {

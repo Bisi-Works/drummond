@@ -253,6 +253,44 @@ describe("buildReportInput", () => {
     expect(byKey.esperando).toMatchObject({ state: "aguardando", level: "verde" })
     expect(byKey.respondida).toEqual({ state: "respondido", level: null, elapsedMs: null })
   })
+
+  it("dia sem nenhuma conversa devolve payload vazio com totais zerados", () => {
+    const input = buildReportInput(day([]), NOW)
+
+    expect(input.date).toBe("2026-10-07")
+    expect(input.conversations).toEqual([])
+    // Médias em `null` (e não `0`) — o prompt escreve "sem dado" em vez de inventar uma medida.
+    expect(input.totals).toEqual({
+      conversations: 0,
+      waiting: 0,
+      waitingByLevel: { verde: 0, amarelo: 0, laranja: 0, vermelho: 0 },
+      alerts: 0,
+      answered: 0,
+      withoutMessage: 0,
+      reviews: 0,
+      coachings: 0,
+      averageFirstResponseMs: null,
+      averageResponseMs: null
+    })
+  })
+
+  it("dia só com registros sem mensagem sai vazio, mas mantém os totais coerentes", () => {
+    const semMensagem = (key: string) =>
+      conversation({
+        key,
+        messageCount: 0,
+        lastMessageAuthor: null,
+        lastMessageText: "",
+        clientSince: null
+      })
+    const input = buildReportInput(day([semMensagem("a"), semMensagem("b")]), NOW)
+
+    expect(input.conversations).toEqual([])
+    expect(input.totals.conversations).toBe(2)
+    expect(input.totals.withoutMessage).toBe(2)
+    expect(input.totals.waiting).toBe(0)
+    expect(input.totals.answered).toBe(0)
+  })
 })
 
 describe("formatReportInput", () => {

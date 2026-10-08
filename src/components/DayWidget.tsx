@@ -23,13 +23,8 @@ import {
   type OpenReportRequest,
   type OpenReportResponse
 } from "~lib/messages"
-import { loadReportGate, type ReportGateState } from "~lib/report/gate"
-import {
-  canGenerateReport,
-  clearReportGeneration,
-  markReportGenerated,
-  saveReport
-} from "~lib/report/storage"
+import { commitGeneratedReport, loadReportGate, type ReportGateState } from "~lib/report/gate"
+import { canGenerateReport, clearReportGeneration } from "~lib/report/storage"
 import { formatDayLabel, formatDuration, formatWait } from "~lib/tracking/format"
 import { waitElapsed, waitLevel } from "~lib/tracking/level"
 import { buildReportInput } from "~lib/tracking/report"
@@ -266,27 +261,16 @@ export const DayWidget = ({ adapter }: Props) => {
       })
       return
     }
-    if (!response.ok) {
-      // A mensagem do `AiResult` já é legível; o botão volta a ficar disponível para nova tentativa.
-      // Nada é marcado aqui: falha da IA não consome a cota do dia.
-      setFinish({ kind: "error", message: response.error })
+    // Grava o relatório e só então marca a cota (e só quando a IA respondeu `ok: true`) — o
+    // invariante mora em `commitGeneratedReport`, testado sem React.
+    const outcome = await commitGeneratedReport(input, response)
+    if (outcome.status === "ai-failed") {
+      setFinish({ kind: "error", message: outcome.error })
       return
     }
-    const generatedAt = Date.now()
-    // Guardar antes de abrir: a página lê o relatório do storage pela data do `?date=`.
-    const saved = await saveReport(input.date, {
-      date: input.date,
-      generatedAt,
-      model: response.meta.model,
-      promptVersion: response.meta.promptVersion,
-      report: response.data,
-      input,
-      // Só existe no dev (`config.showCosts`); a página só renderiza o painel quando ele está lá.
-      cost: response.meta.cost
-    })
     // Sem gravação (extensão recarregada/`chrome.storage` indisponível) não há o que a página
     // abriria: avisa e para aqui, sem abrir uma aba vazia nem consumir a cota do dia.
-    if (!saved) {
+    if (outcome.status === "save-failed") {
       setFinish({
         kind: "error",
         message:
@@ -294,8 +278,6 @@ export const DayWidget = ({ adapter }: Props) => {
       })
       return
     }
-    // Só depois do `ok: true` (e do relatório salvo) a cota do dia é consumida.
-    await markReportGenerated(input.date, generatedAt)
     const opened = await openReportPage(input.date)
     setFinish({ kind: "done", date: input.date, cost: response.meta.cost, openFailed: !opened })
   }
