@@ -119,7 +119,19 @@ const dailyInput = {
 }
 const requests = []
 const priceLookups = []
+const decisionRequests = []
 const fetchStub = async (url, init) => {
+  // Decisions API (Jev): responde como o OpenRouter, com as probabilidades da pergunta única.
+  if (url.endsWith("/api/alpha/decisions")) {
+    const body = JSON.parse(init.body)
+    decisionRequests.push({ body, authorization: new Headers(init.headers).get("Authorization") })
+    const p = body.state.conversa.at(-1).texto.includes("Obrigado") ? 0.99 : 0.2
+    return new Response(JSON.stringify({
+      model: "typesafe/jev-1.13-20260917", provider: "TypeSafe", usage: { input_tokens: 410, output_tokens: 44, cost: 0.0000172 },
+      answers: { reply: { type: "choice", choice: p > 0.5 ? "nao_precisa_resposta" : "precisa_resposta", confidence: 1,
+        probabilities: { nao_precisa_resposta: p, precisa_resposta: 1 - p } } }
+    }))
+  }
   // Preços do modelo (API pública), usados só na estimativa de custo do dev.
   if (url.endsWith("/endpoints")) {
     priceLookups.push(url)
@@ -213,6 +225,17 @@ try {
     check(daily?.meta?.cost === undefined, "produção: relatório diário sem custo na resposta")
   }
 
+  // Decisão "o cliente só encerrou?" (Jev): mesma passagem pelo background, nunca pelo content script.
+  const closeYes = await deliver(listeners, { name: "classify-closing", body: { previous: "Qualquer dúvida é só chamar!", text: "Obrigado!" } })
+  const closeNo = await deliver(listeners, { name: "classify-closing", body: { previous: "Posso te ligar?", text: "ok" } })
+  check(closeYes?.ok === true && closeYes.closing === true && closeNo?.ok === true && closeNo.closing === false,
+    `classify-closing decide pelo limiar (${closeYes?.pNoReply} → dispensa, ${closeNo?.pNoReply} → aguarda)`)
+  const decision = decisionRequests[0]
+  check(decision?.body.provider?.data_collection === "deny" && decision?.authorization === `Bearer ${key}`,
+    "classify-closing: política de dados 'deny' e chave só enviada ao OpenRouter")
+  check(decision?.body.state.conversa.length === 2 && decision.body.questions.reply.type === "choice",
+    "classify-closing: estado com a mensagem anterior do vendedor e pergunta Choice")
+
   check(connectListeners.length > 0, "service worker registra o listener de conexões (coaching)")
   const messages = await connect(connectListeners, "coach-conversation", { conversation })
   const deltas = messages.filter((m) => m.type === "delta")
@@ -231,6 +254,16 @@ try {
   }
 } catch (error) {
   check(false, `service worker executa sem erro: ${error.stack ?? error}`)
+}
+
+// O endpoint da Decisions API e a pergunta ao Jev só podem existir no background: o content script
+// e o painel falam com ele pela rota "classify-closing".
+{
+  const stray = walk(buildDir).filter((file) => {
+    const rel = relative(buildDir, file)
+    return !rel.startsWith(`static${sep}background`) && file.endsWith(".js") && readFileSync(file, "utf8").includes("api/alpha/decisions")
+  })
+  check(stray.length === 0, `endpoint da Decisions API só no background${stray.length ? ` (vazou em ${stray.map((f) => relative(buildDir, f)).join(", ")})` : ""}`)
 }
 
 // 3. Content script ----------------------------------------------------------------------------
@@ -390,6 +423,16 @@ try {
   const warning = (root.textContent ?? "").includes("A cota de um relatório por dia já foi usada")
   check(labels.includes(expected), `widget ${isDevBuild ? "dev" : "produção"}: botão do dia em "${expected}" (${labels.join(" · ") || "nenhum botão"})`)
   check(warning === !isDevBuild, `widget ${isDevBuild ? "dev" : "produção"}: aviso da cota ${isDevBuild ? "ausente" : "presente"}`)
+  // Limpar os dados salvos apaga relatórios e a cota diária: só pode existir na build de dev.
+  const clearLabel = "Limpar dados salvos (dev)"
+  check(
+    labels.includes(clearLabel) === isDevBuild,
+    `widget ${isDevBuild ? "dev" : "produção"}: botão "${clearLabel}" ${isDevBuild ? "presente" : "ausente"}`
+  )
+  if (!isDevBuild) {
+    const emitted = contentScript.js.map((file) => read(file)).join("\n")
+    check(!emitted.includes("Apagar tudo (dev)"), "produção: o código de limpeza dos dados não vai para o bundle")
+  }
   check(errors.length === 0, `widget executa sem erro${errors.length ? `: ${errors[0]}` : ""}`)
   await window.happyDOM.close()
 } catch (error) {

@@ -5,7 +5,12 @@ import { fileURLToPath } from "node:url"
 
 import { beforeEach, describe, expect, it } from "vitest"
 
-import { botconversaAdapter, readBotconversaConversation, visualOrder } from "~adapters/botconversa"
+import {
+  botconversaAdapter,
+  readBotconversaContactName,
+  readBotconversaConversation,
+  visualOrder
+} from "~adapters/botconversa"
 
 // `URL` aqui é a implementação do happy-dom, que não aceita file:// — por isso fileURLToPath.
 const fixturePath = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "botconversa-inbox.html")
@@ -128,6 +133,37 @@ describe("readBotconversaConversation", () => {
   it("retorna vazio fora da tela de chat", () => {
     document.body.innerHTML = "<main>Painel de controle</main>"
     expect(readBotconversaConversation(document, 50)).toEqual([])
+  })
+})
+
+describe("readBotconversaContactName", () => {
+  it("lê o nome do contato no cabeçalho, sem as iniciais do avatar nem espaços sobrando", () => {
+    expect(readBotconversaContactName(document)).toBe("João da Silva")
+    expect(botconversaAdapter.getContactName?.()).toBe("João da Silva")
+  })
+
+  it("não confunde o texto de uma mensagem com o nome do contato", () => {
+    document.querySelector('[class*="_details_"]')?.remove()
+    expect(readBotconversaContactName(document)).toBeNull()
+  })
+
+  it("devolve null sem cabeçalho ou com o nome vazio", () => {
+    const content = document.querySelector('[class*="_details_"] [class*="_content_"] .paragraph-small')
+    content!.textContent = "   "
+    expect(readBotconversaContactName(document)).toBeNull()
+
+    document.body.innerHTML = ""
+    expect(readBotconversaContactName(document)).toBeNull()
+  })
+
+  it("descarta texto longo demais para ser um nome", () => {
+    const content = document.querySelector('[class*="_details_"] [class*="_content_"] .paragraph-small')
+    content!.textContent = "x".repeat(200)
+    expect(readBotconversaContactName(document)).toBeNull()
+  })
+
+  it("não afeta a leitura das mensagens", () => {
+    expect(readBotconversaConversation(document, 50)).toHaveLength(10)
   })
 })
 

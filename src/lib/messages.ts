@@ -57,3 +57,26 @@ export interface OpenReportResponse {
   /** Motivo quando `ok` é falso (ex.: o navegador recusou abrir a aba). */
   error?: string
 }
+
+// Decidir se a última mensagem do cliente é só um encerramento também passa pelo background: a
+// chave do OpenRouter nunca chega ao content script. O texto é curto (a regra de texto filtra antes).
+export const CLASSIFY_CLOSING = "classify-closing"
+
+export interface ClassifyClosingRequest {
+  /** Última mensagem do vendedor antes da do cliente, quando há — muda o sentido de um "ok". */
+  previous?: string
+  /** Última mensagem do cliente. */
+  text: string
+}
+
+export type ClassifyClosingResponse =
+  | {
+      ok: true
+      /** `true` quando P(não precisa de resposta) chegou ao limiar configurado. */
+      closing: boolean
+      /** P(não precisa de resposta), de 0 a 1. */
+      pNoReply: number
+      /** Custo real em US$ devolvido pelo OpenRouter, quando vem. */
+      cost?: number
+    }
+  | { ok: false; error: string }

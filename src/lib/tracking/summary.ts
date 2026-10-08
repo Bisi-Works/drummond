@@ -58,7 +58,8 @@ const span = (from: number | null, to: number | null): number | null =>
   from === null || to === null ? null : Math.max(0, to - from)
 
 /** Conversas do dia; a ordem do objeto não importa para nenhuma agregação daqui. */
-const conversationList = (day: DayLog): TrackedConversation[] => Object.values(day.conversations)
+const conversationList = (day: DayLog): TrackedConversation[] =>
+  Object.values(day.conversations).filter((conversation) => !conversation.released)
 
 /**
  * Estado da conversa agora. Aguardando quando ainda há espera aberta (`clientSince` gravado) ou

@@ -14,5 +14,6 @@ declare module "@plasmohq/messaging" {
     "review-draft": {}
     "generate-report": {}
     "open-report": {}
+    "classify-closing": {}
   }
 }

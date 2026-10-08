@@ -1,7 +1,8 @@
-import type { ChatAuthor } from "~adapters/types"
+import type { ChatAuthor, InboxChat } from "~adapters/types"
 import { localArea, storageChanges } from "~lib/chrome-storage"
 
 import { DAY_LOG_PREFIX, WIDGET_POSITION_KEY, WIDGET_POSITION_VERSION } from "./constants"
+import { isClosingMessage } from "./closing"
 import { dayKey } from "./level"
 import type {
   DayLog,
@@ -83,7 +84,7 @@ const minimalConversation = (key: string, now: number): TrackedConversation => (
  */
 const normalizeConversation = (key: string, value: unknown): TrackedConversation => {
   const stored = (value && typeof value === "object" ? value : {}) as Partial<TrackedConversation>
-  return {
+  const conversation: TrackedConversation = {
     ...stored,
     key: typeof stored.key === "string" && stored.key ? stored.key : key,
     platform: typeof stored.platform === "string" ? stored.platform : "",
@@ -100,6 +101,12 @@ const normalizeConversation = (key: string, value: unknown): TrackedConversation
     messageCount: numberOrNull(stored.messageCount) ?? 0,
     reviewCount: numberOrNull(stored.reviewCount) ?? 0
   }
+  // Campos da inbox só existem quando a conversa veio da API; ausentes (ou inválidos) ficam de fora.
+  if (isFiniteNumber(stored.lastInboxAt)) conversation.lastInboxAt = stored.lastInboxAt
+  else delete conversation.lastInboxAt
+  if (stored.released === true) conversation.released = true
+  else delete conversation.released
+  return conversation
 }
 
 /** Valida o que veio do storage; qualquer valor estranho vira um dia vazio. */
@@ -232,13 +239,35 @@ export const observeConversation = (prev: DayLog, input: ConversationObservation
   const existing = prev.conversations[key]
   const base = existing ?? minimalConversation(key, now)
 
+  // O cliente encerrando ("obrigado", 👍) não exige resposta: registra a mensagem, mas não abre
+  // nem fecha espera. Se já aguardava outra coisa continua aguardando; se estava respondida, segue.
+  if (author === "cliente" && isClosingMessage(input.text)) {
+    const conversation: TrackedConversation = {
+      ...base,
+      platform: input.platform || base.platform,
+      label: input.label || base.label,
+      lastSeenAt: now,
+      lastMessageAuthor: base.lastMessageAuthor ?? "sistema",
+      lastMessageText: input.text,
+      messageCount: Math.max(base.messageCount, input.messageCount)
+    }
+    return { ...prev, conversations: { ...prev.conversations, [key]: conversation }, updatedAt: now }
+  }
+
   const clientSince =
     author === "vendedor" ? null : author === "cliente" ? (base.clientSince ?? now) : base.clientSince
 
   // Momentos por autor: a última mensagem do cliente reabre o ciclo, então zera `firstResponseAt`
   // (a próxima resposta do vendedor passa a ser a primeira do ciclo). Bot/sistema não mexem em
   // nenhum dos três — só cliente e vendedor abrem e fecham uma espera.
-  const lastClientAt = author === "cliente" ? now : (base.lastClientAt ?? null)
+  // `messageCount === 0` com `lastClientAt` gravado é uma conversa semeada pela inbox e ainda não
+  // vista pelo DOM: o horário da API é o real, e o instante desta observação seria só mais tarde.
+  const lastClientAt =
+    author === "cliente"
+      ? base.messageCount === 0 && base.lastClientAt !== null
+        ? base.lastClientAt
+        : now
+      : (base.lastClientAt ?? null)
   const lastSellerAt = author === "vendedor" ? now : (base.lastSellerAt ?? null)
   const firstResponseAt =
     author === "cliente" ? null : (base.firstResponseAt ?? (author === "vendedor" ? now : null))
@@ -260,6 +289,114 @@ export const observeConversation = (prev: DayLog, input: ConversationObservation
   }
 
   return { ...prev, conversations: { ...prev.conversations, [key]: conversation }, updatedAt: now }
+}
+
+/**
+ * Aplica ao dia a lista de chats da inbox (a API da plataforma), conciliando-a com o que o DOM já
+ * observou. A API é a fonte do horário REAL e de quem falou por último; o DOM continua mandando no
+ * chat aberto, que reage em ~1 s enquanto a inbox só é relida de tempos em tempos.
+ *
+ * - **Só nasce conversa aguardando.** Um chat cuja última mensagem é nossa (e que não existe no
+ *   dia) não entra: seriam campanhas e conversas já resolvidas, e o que o vendedor responde entra
+ *   pelo DOM. Só quem ainda espera resposta merece aparecer.
+ * - **Resposta local vence inbox atrasada.** Se a mensagem do cliente que a API devolve não é mais
+ *   nova que a última resposta que o DOM viu, a API apenas ainda não sabe da resposta: ignora.
+ * - Nota interna, evento de sistema e o cliente encerrando ("obrigado", 👍) como última mensagem não
+ *   dizem quem espera quem: mantêm o estado anterior.
+ * - Com `complete`, conversa aguardando que não está nos chats do vendedor foi reatribuída ou
+ *   encerrada (ou nunca foi dele, se o DOM a viu antes da primeira leitura): sai de totais e fila
+ *   (`released`) em vez de alarmar para sempre. Conversas já respondidas ficam: o histórico do dia
+ *   continua valendo.
+ */
+export const applyInbox = (
+  prev: DayLog,
+  chats: InboxChat[],
+  options: { platform: string; now: number; complete: boolean }
+): DayLog => {
+  const { platform, now, complete } = options
+  const conversations = { ...prev.conversations }
+  const seen = new Set<string>()
+
+  for (const chat of chats) {
+    seen.add(chat.key)
+    const existing = conversations[chat.key]
+    const base = existing ?? minimalConversation(chat.key, now)
+    const known = {
+      platform: base.platform || platform,
+      label: chat.name || base.label,
+      lastInboxAt: Math.max(base.lastInboxAt ?? 0, chat.lastMessageAt),
+      released: false
+    }
+    // Prévia só quando a mensagem é mais nova que a última já aplicada: o DOM, que lê o texto
+    // completo do chat aberto, não é desfeito a cada releitura da lista.
+    const newer = chat.lastMessageAt > (base.lastInboxAt ?? 0)
+    const text = newer && chat.preview ? chat.preview : base.lastMessageText
+
+    if (chat.lastKind !== "message") {
+      if (existing) {
+        // Espera que começou NESTA mensagem de encerramento (ex.: o DOM a viu antes de a IA
+        // decidir) foi aberta por engano: nada a responder. Se a espera é anterior, é de uma
+        // pergunta que o "obrigado" não resolve, e continua.
+        const openedByClosing =
+          chat.lastKind === "closing" && existing.clientSince !== null && existing.clientSince >= chat.lastMessageAt
+        conversations[chat.key] = openedByClosing
+          ? {
+              ...existing,
+              ...known,
+              clientSince: null,
+              lastMessageAuthor: existing.lastSellerAt === null ? "sistema" : "vendedor"
+            }
+          : { ...existing, ...known }
+      }
+      continue
+    }
+
+    if (!chat.lastFromAccount) {
+      if (chat.lastMessageAt <= (base.lastSellerAt ?? 0)) {
+        if (existing) conversations[chat.key] = { ...existing, ...known }
+        continue
+      }
+      const reopening = base.clientSince === null
+      conversations[chat.key] = {
+        ...base,
+        ...known,
+        lastMessageAuthor: "cliente",
+        lastMessageText: text,
+        lastMessageAt: chat.lastMessageAt,
+        clientSince: reopening ? chat.lastMessageAt : Math.min(base.clientSince ?? chat.lastMessageAt, chat.lastMessageAt),
+        lastClientAt: chat.lastMessageAt,
+        firstResponseAt: reopening ? null : base.firstResponseAt
+      }
+      continue
+    }
+
+    // Última mensagem nossa: só importa para quem estava aguardando (a espera acabou).
+    if (!existing) continue
+    conversations[chat.key] =
+      existing.clientSince === null
+        ? { ...existing, ...known }
+        : {
+            ...existing,
+            ...known,
+            lastMessageAuthor: "vendedor",
+            lastMessageText: text,
+            lastMessageAt: chat.lastMessageAt,
+            clientSince: null,
+            firstResponseAt: existing.firstResponseAt ?? chat.lastMessageAt,
+            lastSellerAt: Math.max(existing.lastSellerAt ?? 0, chat.lastMessageAt)
+          }
+  }
+
+  if (complete) {
+    for (const [key, conversation] of Object.entries(conversations)) {
+      const waiting = conversation.clientSince !== null
+      if (conversation.platform === platform && waiting && !seen.has(key)) {
+        conversations[key] = { ...conversation, released: true }
+      }
+    }
+  }
+
+  return { ...prev, conversations, updatedAt: now }
 }
 
 /** Anexa a última revisão de rascunho à conversa e conta mais uma revisão do dia. */

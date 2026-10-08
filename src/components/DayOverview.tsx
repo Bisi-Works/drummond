@@ -16,20 +16,14 @@ const Stat = ({ value, label }: { value: number | string; label: string }) => (
   </div>
 )
 
-/** Uma conversa da fila de atenção: rótulo, prévia e chip do semáforo com o tempo de espera. */
+/** Uma conversa da fila de atenção: nome do contato e chip do semáforo com o tempo de espera. */
 const AttentionRow = ({ item }: { item: AttentionItem }) => {
   const { conversation, status } = item
-  const preview = conversation.lastMessageText.trim() || "Sem mensagens ainda"
   return (
-    <li className="flex items-start justify-between gap-2 rounded-lg border border-line bg-muted/60 px-3 py-2">
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-fg" title={conversation.label}>
-          {conversation.label}
-        </p>
-        <p className="mt-0.5 truncate text-[11px] text-fg-muted" title={preview}>
-          {preview}
-        </p>
-      </div>
+    <li className="flex items-center justify-between gap-2 rounded-lg border border-line bg-muted/60 px-3 py-2">
+      <p className="min-w-0 flex-1 truncate text-sm font-semibold text-fg" title={conversation.label}>
+        {conversation.label}
+      </p>
       {status.level && status.elapsedMs !== null ? (
         <span
           className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${WAIT_CHIP[status.level]}`}

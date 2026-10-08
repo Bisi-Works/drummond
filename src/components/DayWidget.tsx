@@ -14,6 +14,7 @@ import { Spinner } from "~components/Spinner"
 import { useDayTracking } from "~hooks/useDayTracking"
 import type { CostInfo } from "~lib/ai/cost"
 import { config as appConfig } from "~lib/config"
+import { clearSavedData } from "~lib/dev-reset"
 import { WAIT_CHIP, WAIT_ROW } from "~lib/labels"
 import {
   GENERATE_REPORT,
@@ -26,82 +27,52 @@ import {
 import { commitGeneratedReport, loadReportGate, type ReportGateState } from "~lib/report/gate"
 import { canGenerateReport, clearReportGeneration } from "~lib/report/storage"
 import { formatDayLabel, formatDuration, formatWait } from "~lib/tracking/format"
-import { waitElapsed, waitLevel } from "~lib/tracking/level"
 import { buildReportInput } from "~lib/tracking/report"
+import type { AttentionItem } from "~lib/tracking/summary"
 import {
   DEFAULT_WIDGET_POSITION,
   loadWidgetPosition,
   saveWidgetPosition,
   type WidgetPosition
 } from "~lib/tracking/store"
-import type { TrackedConversation } from "~lib/tracking/types"
 
-// Widget flutuante do protótipo: lista as conversas acompanhadas hoje e pinta o tempo de espera
-// desde a última mensagem do cliente. É injetado no shadow DOM pelo content script (companion.tsx)
+// Widget flutuante do protótipo: lista só as conversas que aguardam resposta (nome do contato e
+// tempo de espera desde a última mensagem do cliente). É injetado no shadow DOM pelo content script (companion.tsx)
 // e por isso não vaza CSS para a página. A posição é arrastável e persistida em chrome.storage.
+
+// Literal `process.env.NODE_ENV` (e não `appConfig.showCosts`): o bundler o resolve na build e
+// remove o ramo da limpeza de dados na versão de produção, em vez de só não renderizá-lo.
+const IS_DEV_BUILD = process.env.NODE_ENV === "development"
 
 const CARD_WIDTH = 300
 const HEADER_HEIGHT = 44
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
-/** Estado neutro de quem não está aguardando resposta. */
-const idleLabel = (conversation: TrackedConversation): string =>
-  conversation.lastMessageAuthor === "vendedor" ? "respondido" : "sem pendência"
-
-const ConversationRow = ({
-  conversation,
-  now,
-  highlighted
-}: {
-  conversation: TrackedConversation
-  now: number
-  highlighted: boolean
-}) => {
-  const elapsed = waitElapsed(conversation, now)
-  const level = elapsed === null ? null : waitLevel(elapsed)
-  const preview = conversation.lastMessageText.trim() || "Sem mensagens ainda"
-  const signal = conversation.lastCoaching
-    ? `Coaching: ${conversation.lastCoaching.nextStep}`
-    : conversation.lastReview
-      ? `Revisão: ${conversation.lastReview.summary}`
-      : null
-
+/**
+ * Uma conversa aguardando resposta: só o nome do contato e há quanto tempo ele espera. O texto da
+ * última mensagem não aparece de propósito — o que importa ao vendedor é quem e há quanto tempo.
+ */
+const ConversationRow = ({ item }: { item: AttentionItem }) => {
+  const { conversation, status } = item
   return (
     <li
-      className={`rounded-lg border border-line bg-muted/60 px-2.5 py-2 ${
-        highlighted ? `ring-1 ring-inset ${WAIT_ROW[level ?? "verde"]}` : ""
+      className={`flex items-center justify-between gap-2 rounded-lg border border-line bg-muted/60 px-2.5 py-2 ring-1 ring-inset ${
+        WAIT_ROW[status.level ?? "verde"]
       }`}>
-      <div className="flex items-start justify-between gap-2">
-        <span className="min-w-0 flex-1 truncate text-xs font-medium text-fg" title={conversation.label}>
-          {conversation.label}
+      <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-fg" title={conversation.label}>
+        {conversation.label}
+      </span>
+      {status.level && status.elapsedMs !== null ? (
+        <span
+          className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${WAIT_CHIP[status.level]}`}
+          title={`Aguardando há ${formatDuration(status.elapsedMs)}`}>
+          {formatWait(status.elapsedMs)}
         </span>
-        {level && elapsed !== null ? (
-          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${WAIT_CHIP[level]}`}>
-            {formatWait(elapsed)}
-          </span>
-        ) : (
-          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-fg-subtle">
-            {highlighted ? "aguardando" : idleLabel(conversation)}
-          </span>
-        )}
-      </div>
-      <p className="mt-1 truncate text-[11px] text-fg-muted" title={preview}>
-        {preview}
-      </p>
-      {(signal || conversation.reviewCount > 0) && (
-        <p className="mt-1 flex items-center gap-1.5 text-[11px] text-fg-subtle">
-          {signal && (
-            <span className="min-w-0 flex-1 truncate" title={signal}>
-              {signal}
-            </span>
-          )}
-          {conversation.reviewCount > 0 && (
-            <span className="shrink-0">
-              {conversation.reviewCount} revisão{conversation.reviewCount > 1 ? "ões" : ""}
-            </span>
-          )}
-        </p>
+      ) : (
+        <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-fg-subtle">
+          aguardando
+        </span>
       )}
     </li>
   )
@@ -135,9 +106,14 @@ interface Props {
 }
 
 export const DayWidget = ({ adapter }: Props) => {
-  const { day, conversations, now, summary, attention, alertCount } = useDayTracking(adapter)
+  const { day, conversations, now, summary, attention, alertCount, inbox, resetDay } =
+    useDayTracking(adapter)
   const [position, setPosition] = useState<WidgetPosition>(DEFAULT_WIDGET_POSITION)
   const [finish, setFinish] = useState<FinishState>({ kind: "idle" })
+  // Só no dev: limpar os dados salvos exige um segundo clique, porque apaga relatórios e a cota.
+  const [clearState, setClearState] = useState<
+    { kind: "idle" } | { kind: "confirm" } | { kind: "done"; removed: number } | { kind: "error" }
+  >({ kind: "idle" })
   // Trava diária: em produção bloqueia a segunda geração; em dev/`reportUnlimited` fica liberada.
   const [reportGate, setReportGate] = useState<ReportGateState>({ locked: false, stored: false })
   const rootRef = useRef<HTMLDivElement>(null)
@@ -216,13 +192,6 @@ export const DayWidget = ({ adapter }: Props) => {
 
   const toggleMinimized = () => persist({ ...positionRef.current, minimized: !positionRef.current.minimized })
 
-  // Fila de atenção primeiro (ordem de `attentionQueue`), depois o resto como já vinha (última vista).
-  const attentionKeys = new Set(attention.map((item) => item.conversation.key))
-  const ordered = [
-    ...attention.map((item) => item.conversation),
-    ...conversations.filter((conversation) => !attentionKeys.has(conversation.key))
-  ]
-
   const style: CSSProperties = { position: "fixed", top: position.top }
   if (position.left !== undefined) style.left = position.left
   else style.right = position.right ?? DEFAULT_WIDGET_POSITION.right
@@ -291,6 +260,18 @@ export const DayWidget = ({ adapter }: Props) => {
   }
 
   /** Dev: limpa a marca do dia e gera de novo, para repetir os testes sem depender da cota. */
+  const clearData = async () => {
+    const removed = await clearSavedData()
+    if (removed === null) {
+      setClearState({ kind: "error" })
+      return
+    }
+    resetDay()
+    setFinish({ kind: "idle" })
+    setReportGate({ locked: false, stored: false })
+    setClearState({ kind: "done", removed })
+  }
+
   const regenerate = async () => {
     await clearReportGeneration(day.date)
     setReportGate((gate) => ({ ...gate, locked: false }))
@@ -322,7 +303,7 @@ export const DayWidget = ({ adapter }: Props) => {
             </span>
           )}
           <span className="text-[11px] leading-none text-gray-400">
-            {formatDayLabel(day.date)} · {conversations.length}
+            {formatDayLabel(day.date)} · {summary.waiting} aguardando
           </span>
           <button
             type="button"
@@ -338,19 +319,16 @@ export const DayWidget = ({ adapter }: Props) => {
       {!position.minimized && (
         <>
           <div style={{ width: CARD_WIDTH }} className="flex-1 overflow-y-auto p-2.5">
-            {conversations.length === 0 ? (
+            {attention.length === 0 ? (
               <p className="px-1 py-6 text-center text-xs text-fg-subtle">
-                Nenhuma conversa acompanhada hoje ainda
+                {conversations.length === 0
+                  ? "Nenhuma conversa acompanhada hoje ainda"
+                  : "Ninguém aguardando resposta"}
               </p>
             ) : (
               <ul className="space-y-2">
-                {ordered.map((conversation) => (
-                  <ConversationRow
-                    key={conversation.key}
-                    conversation={conversation}
-                    now={now}
-                    highlighted={attentionKeys.has(conversation.key)}
-                  />
+                {attention.map((item) => (
+                  <ConversationRow key={item.conversation.key} item={item} />
                 ))}
               </ul>
             )}
@@ -363,6 +341,13 @@ export const DayWidget = ({ adapter }: Props) => {
               {summary.averageFirstResponseMs !== null && (
                 <span title="Média do tempo até a primeira resposta do vendedor">
                   1ª resposta em {formatDuration(summary.averageFirstResponseMs)}
+                </span>
+              )}
+              {inbox.status === "error" && (
+                <span
+                  className="text-amber-600 dark:text-amber-300"
+                  title="Não foi possível ler a inbox; só a conversa aberta está sendo acompanhada.">
+                  sem sincronizar com a inbox
                 </span>
               )}
             </div>
@@ -413,6 +398,50 @@ export const DayWidget = ({ adapter }: Props) => {
                 className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-line bg-surface px-3 py-2 text-xs font-medium text-fg-muted transition hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed">
                 Gerar novamente (dev)
               </button>
+            )}
+
+            {IS_DEV_BUILD && (
+              <div className="space-y-1">
+                {clearState.kind === "confirm" ? (
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => void clearData()}
+                      className="flex-1 rounded-lg bg-rose-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-rose-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
+                      Apagar tudo (dev)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setClearState({ kind: "idle" })}
+                      className="rounded-lg border border-line bg-surface px-3 py-2 text-xs font-medium text-fg-muted transition hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setClearState({ kind: "confirm" })}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-line bg-surface px-3 py-2 text-xs font-medium text-fg-muted transition hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
+                    Limpar dados salvos (dev)
+                  </button>
+                )}
+                {clearState.kind === "confirm" && (
+                  <p className="text-[11px] text-fg-subtle">
+                    Apaga os dias, os relatórios e a trava diária. Posição e tema ficam.
+                  </p>
+                )}
+                {clearState.kind === "done" && (
+                  <p className="text-[11px] text-fg-subtle" aria-live="polite">
+                    {clearState.removed} registro{clearState.removed === 1 ? "" : "s"} apagado
+                    {clearState.removed === 1 ? "" : "s"}.
+                  </p>
+                )}
+                {clearState.kind === "error" && (
+                  <p role="alert" className="text-[11px] text-rose-700 dark:text-rose-300">
+                    Não foi possível apagar (sem acesso ao storage da extensão).
+                  </p>
+                )}
+              </div>
             )}
 
             {finish.kind === "error" && (

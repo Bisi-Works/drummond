@@ -70,6 +70,18 @@ export interface TrackedConversation {
   reviewCount: number
   lastReview?: TrackedReviewSignal
   lastCoaching?: TrackedCoachingSignal
+  /**
+   * `last_message_datetime` da inbox já aplicado a esta conversa (epoch ms); ausente/`null` quando
+   * a conversa só foi vista pelo DOM. Serve para só aplicar a prévia de mensagens mais novas que a
+   * última já vista, sem desfazer o texto completo que o DOM leu.
+   */
+  lastInboxAt?: number | null
+  /**
+   * `true` quando uma varredura completa da inbox não trouxe esta conversa enquanto ela aguardava
+   * (foi reatribuída, encerrada ou nunca foi do vendedor). Fica no log, mas sai de totais, fila e relatório: não é mais do
+   * vendedor. Volta a `false` se a conversa reaparecer.
+   */
+  released?: boolean
 }
 
 /** Tudo o que a extensão registrou em um dia (uma chave `${DAY_LOG_PREFIX}${date}` no storage). */

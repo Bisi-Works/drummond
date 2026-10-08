@@ -64,9 +64,14 @@ Os limites ficam em `WAIT_LIMITS_MS` (`src/lib/tracking/constants.ts`):
 **Alerta** é qualquer conversa aguardando em **laranja ou vermelho**; é o número do badge no
 cabeçalho do widget (`summary.alerts`).
 
-`conversationLabel` (`src/lib/tracking/level.ts`, `LABEL_MAX = 40`) deriva um rótulo curto do início
-da primeira mensagem do cliente — sem mapear seletores novos — e cai para a `key` (o `chat_id`) quando
-não há texto.
+O rótulo de cada conversa é o **nome do contato** lido do cabeçalho do chat
+(`adapter.getContactName()`; no Botconversa, `_chatArea_ > _root_ … _details_ > _content_ >
+.paragraph-small`). Ao trocar de conversa o `chat_id` da URL muda ~200 ms antes do cabeçalho, então
+`confirmContactName` (`src/lib/tracking/level.ts`) só aceita o nome depois de vê-lo igual em dois
+ticks seguidos para a mesma conversa — assim a conversa nova não herda o nome da anterior. Até
+confirmar, vale o rótulo já gravado, ou a `key` (o `chat_id`) numa conversa nunca vista. O trecho da
+última mensagem não aparece mais no widget nem no painel: cada linha é só o nome e o tempo de espera,
+e só as conversas aguardando são listadas (os respondidos ficam nos totais do rodapé).
 
 ## Totais do dia (`summarizeDay`)
 

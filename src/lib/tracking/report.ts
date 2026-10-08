@@ -72,7 +72,7 @@ export const buildReportInput = (day: DayLog, now: number): DailyReportInput => 
   date: day.date,
   totals: summarizeDay(day, now),
   conversations: Object.values(day.conversations)
-    .filter(hasMessage)
+    .filter((conversation) => !conversation.released && hasMessage(conversation))
     .map((conversation) => ({ conversation, status: conversationStatus(conversation, now) }))
     .sort(
       (a, b) =>

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { ChatMessage } from "~adapters/types"
 import type { CoachingReport, DraftReview } from "~lib/ai/schemas"
 import { WAIT_LIMITS_MS } from "~lib/tracking/constants"
-import { conversationLabel, dayKey, rolloverDate, waitElapsed, waitLevel } from "~lib/tracking/level"
+import { confirmContactName, dayKey, rolloverDate, waitElapsed, waitLevel } from "~lib/tracking/level"
 import { coachingSignal, reviewSignal, reviewSummary } from "~lib/tracking/signals"
 import {
   attachCoaching,
@@ -22,30 +22,36 @@ const message = (author: ChatMessage["author"], text: string): ChatMessage => ({
   text
 })
 
-describe("conversationLabel", () => {
-  it("usa o início da primeira mensagem do cliente", () => {
-    const messages = [
-      message("vendedor", "Oi, tudo bem?"),
-      message("cliente", "Boa tarde, queria saber o preço do plano")
-    ]
-    expect(conversationLabel(messages, "chat-123")).toBe("Boa tarde, queria saber o preço do plano")
+describe("confirmContactName", () => {
+  it("não confirma na primeira leitura: o cabeçalho pode ainda ser o da conversa anterior", () => {
+    const first = confirmContactName(null, "chat-2", "Maria")
+    expect(first.confirmed).toBeNull()
+    expect(first.pending).toEqual({ key: "chat-2", name: "Maria" })
   })
 
-  it("pega só a primeira linha e colapsa espaços", () => {
-    const messages = [message("cliente", "  Quero   saber\nsobre o produto  ")]
-    expect(conversationLabel(messages, "chat-123")).toBe("Quero saber")
+  it("confirma quando a mesma conversa repete o mesmo nome no tick seguinte", () => {
+    const first = confirmContactName(null, "chat-2", "Maria")
+    expect(confirmContactName(first.pending, "chat-2", "Maria").confirmed).toBe("Maria")
   })
 
-  it("trunca trechos longos com reticências", () => {
-    const messages = [message("cliente", "a".repeat(80))]
-    const label = conversationLabel(messages, "chat-123")
-    expect(label).toHaveLength(40)
-    expect(label.endsWith("…")).toBe(true)
+  it("não dá o nome da conversa anterior à conversa nova (cabeçalho atrasado)", () => {
+    const old = confirmContactName(confirmContactName(null, "chat-1", "João").pending, "chat-1", "João")
+    expect(old.confirmed).toBe("João")
+
+    // URL já trocou para chat-2, mas o cabeçalho ainda mostra João: não confirma
+    const stale = confirmContactName(old.pending, "chat-2", "João")
+    expect(stale.confirmed).toBeNull()
+
+    // cabeçalho atualizou: nome novo, ainda sem confirmar; só no tick seguinte vale
+    const updated = confirmContactName(stale.pending, "chat-2", "Maria")
+    expect(updated.confirmed).toBeNull()
+    expect(confirmContactName(updated.pending, "chat-2", "Maria").confirmed).toBe("Maria")
   })
 
-  it("cai para a própria chave quando não há mensagem do cliente", () => {
-    expect(conversationLabel([message("vendedor", "Olá")], "chat-123")).toBe("chat-123")
-    expect(conversationLabel([], "chat-123")).toBe("chat-123")
+  it("zera o pendente quando não há nome na tela", () => {
+    const pending = { key: "chat-1", name: "João" }
+    expect(confirmContactName(pending, "chat-1", null)).toEqual({ confirmed: null, pending: null })
+    expect(confirmContactName(pending, "chat-1", "")).toEqual({ confirmed: null, pending: null })
   })
 })
 

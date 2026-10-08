@@ -1,10 +1,15 @@
-import type { ChatMessage } from "~adapters/types"
-
 import { WAIT_LIMITS_MS } from "./constants"
 import type { TrackedConversation, WaitLevel } from "./types"
 
 // Funções puras do dia: data local, semáforo de espera e tempo decorrido. Ficam fora do store
 // (que mexe com `chrome.storage`) para serem testáveis sem navegador nem rede.
+
+/** Meia-noite local do dia de `at` (epoch ms): o corte "chats de hoje" da inbox. */
+export const dayStart = (at: number): number => {
+  const date = new Date(at)
+  date.setHours(0, 0, 0, 0)
+  return date.getTime()
+}
 
 /**
  * Data local no formato YYYY-MM-DD. Não usamos `toISOString()`: ele formata em UTC e no Brasil
@@ -57,18 +62,30 @@ export const WAIT_LEVEL_SEVERITY: Record<WaitLevel, number> = {
 export const waitElapsed = (conversation: TrackedConversation, now: number): number | null =>
   conversation.clientSince === null ? null : Math.max(0, now - conversation.clientSince)
 
-/** Tamanho máximo do rótulo exibido no widget (o cabeçalho é estreito). */
-const LABEL_MAX = 40
+/** Última leitura do nome do contato, guardada entre ticks para `confirmContactName`. */
+export interface PendingContactName {
+  key: string
+  name: string
+}
 
 /**
- * Rótulo curto da conversa para o widget, derivado do que a extensão já carregou — sem mapear
- * nenhum seletor novo do Botconversa (o nome do contato fica no cabeçalho, que esta fase não lê).
- * Usa o início da primeira mensagem do cliente; sem texto nenhum, cai para a própria `key`
- * (ex.: o `chat_id` da URL).
+ * Só aceita o nome do contato depois de vê-lo igual em dois ticks seguidos para a MESMA conversa.
+ *
+ * No Botconversa, ao trocar de conversa o `chat_id` da URL muda antes do cabeçalho: por ~200 ms a
+ * conversa nova aparece com o nome do contato anterior. Uma única leitura nessa janela daria o nome
+ * errado à conversa nova; como o tick é de ~1 s, a segunda leitura já vê o cabeçalho atualizado e
+ * o par `key` + `name` só se repete quando o nome é de fato daquela conversa.
+ *
+ * Devolve `confirmed` (o nome, ou `null` enquanto não confirmado) e o `pending` a guardar para o
+ * próximo tick. Sem nome na tela (`null`), zera o pendente.
  */
-export const conversationLabel = (messages: ChatMessage[], key: string): string => {
-  const first = messages.find((m) => m.author === "cliente" && m.text.trim())
-  const snippet = (first?.text ?? "").trim().split("\n")[0].replace(/\s+/g, " ")
-  if (!snippet) return key
-  return snippet.length > LABEL_MAX ? `${snippet.slice(0, LABEL_MAX - 1)}…` : snippet
+export const confirmContactName = (
+  pending: PendingContactName | null,
+  key: string,
+  name: string | null
+): { confirmed: string | null; pending: PendingContactName | null } => {
+  if (!name) return { confirmed: null, pending: null }
+  const reading = { key, name }
+  const same = pending?.key === key && pending.name === name
+  return { confirmed: same ? name : null, pending: reading }
 }

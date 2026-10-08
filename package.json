@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "check:bundle": "node scripts/check-bundle.mjs",
-    "verify": "pnpm test && pnpm typecheck && pnpm build && pnpm check:bundle"
+    "verify": "pnpm test && pnpm typecheck && pnpm build && pnpm check:bundle",
+    "bench:closing": "vitest run -c vitest.benchmark.config.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "5.3.0",

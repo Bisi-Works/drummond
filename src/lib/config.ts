@@ -94,14 +94,35 @@ const report: ModelConfig = {
   timeoutMs: 90_000
 }
 
+/**
+ * Decisão "o cliente só encerrou a conversa?" (ver `lib/ai/jev.ts`): roda depois da regra de texto,
+ * só para mensagens curtas que ela não resolve. Falha ou dúvida = a conversa continua aguardando.
+ */
+const closing = {
+  /** `PLASMO_PUBLIC_CLOSING_AI=off` desliga a IA e deixa só a regra de texto. */
+  enabled: process.env.PLASMO_PUBLIC_CLOSING_AI !== "off",
+  model: process.env.PLASMO_PUBLIC_CLOSING_MODEL || "typesafe/jev-1.13",
+  /** Só dispensa a conversa quando P(não precisa de resposta) chega a este valor (0,5 a 0,999). */
+  threshold: Math.min(0.999, Math.max(0.5, toNumber(process.env.PLASMO_PUBLIC_CLOSING_THRESHOLD) ?? 0.95)),
+  timeoutMs: 8_000
+}
+
 export const config = {
   review,
   coach,
   report,
+  closing,
   contextMessages: toNumber(process.env.PLASMO_PUBLIC_CONTEXT_MESSAGES) ?? 20,
   /** O coaching olha a conversa inteira carregada na tela, até este limite. */
   coachMessages: 80,
   denyDataCollection: process.env.PLASMO_PUBLIC_DENY_DATA_COLLECTION !== "false",
+  /** De quanto em quanto tempo a inbox é relida (só com a aba visível). */
+  inboxPollMs: toNumber(process.env.PLASMO_PUBLIC_INBOX_POLL_MS) ?? 60_000,
+  /**
+   * Só para teste: lista os chats de outro membro da equipe (`user_id_filter`) em vez de "meus
+   * chats". Serve a quem testa com uma conta de gestor, que não tem chats atribuídos.
+   */
+  inboxUserId: toNumber(process.env.PLASMO_PUBLIC_INBOX_USER_ID),
   /**
    * Quantos relatórios por dia o vendedor pode gerar em produção (ver `canGenerateReport`).
    * Padrão 1: um relatório por dia, que é o custo previsto do recurso.
