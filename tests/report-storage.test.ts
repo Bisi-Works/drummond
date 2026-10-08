@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { CostInfo } from "~lib/ai/cost"
 import type { DailyReport } from "~lib/ai/schemas"
 import {
   canGenerateReport,
@@ -124,6 +125,19 @@ const stored = (over: Partial<StoredReport> = {}): StoredReport => ({
   ...over
 })
 
+// Custo estimado × efetivo como o `AiMeta.cost` devolve no dev; guardado junto do relatório para
+// a página renderizar o painel sem uma nova chamada.
+const cost: CostInfo = {
+  estimate: { inputTokens: 100, outputTokens: 1_200, minUsd: 0.0001, maxUsd: 0.0002, providers: 2 },
+  effective: {
+    usd: 0.00015,
+    inputTokens: 100,
+    outputTokens: 1_200,
+    reasoningTokens: 0,
+    provider: "DeepInfra"
+  }
+}
+
 describe("saveReport / loadReport", () => {
   it("faz round-trip do relatório na chave prefixada da própria data", async () => {
     const chrome = installChrome()
@@ -155,6 +169,13 @@ describe("saveReport / loadReport", () => {
 
     Reflect.deleteProperty(globalThis, "chrome")
     await expect(loadReport("2026-10-07")).resolves.toBeNull()
+  })
+
+  it("guarda e relê o custo da geração quando ele existe (só no dev)", async () => {
+    installChrome()
+    await saveReport("2026-10-07", stored({ cost }))
+
+    await expect(loadReport("2026-10-07")).resolves.toEqual(stored({ cost }))
   })
 
   it("devolve true quando grava e false quando não há como gravar", async () => {
@@ -327,5 +348,14 @@ describe("validadores", () => {
     expect(toStoredReport({ generatedAt: 1 }, "2026-10-07")).toBeNull()
     expect(toStoredReport(stored({ model: "" }), "2026-10-07")).toBeNull()
     expect(toStoredReport({ ...stored(), input: null }, "2026-10-07")).toBeNull()
+  })
+
+  it("toStoredReport mantém o custo válido e descarta um formato inesperado", () => {
+    expect(toStoredReport(stored({ cost }), "2026-10-07")?.cost).toEqual(cost)
+
+    // Custo corrompido não invalida o relatório inteiro: só o painel do dev fica de fora.
+    const withBadCost = toStoredReport(stored({ cost: { estimate: 5 } as never }), "2026-10-07")
+    expect(withBadCost).not.toBeNull()
+    expect(withBadCost?.cost).toBeUndefined()
   })
 })

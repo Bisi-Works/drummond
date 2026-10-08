@@ -1,3 +1,4 @@
+import type { CostInfo } from "~lib/ai/cost"
 import type { DailyReport } from "~lib/ai/schemas"
 import { localArea } from "~lib/chrome-storage"
 import { config } from "~lib/config"
@@ -47,6 +48,11 @@ export interface StoredReport {
   report: DailyReport
   /** Payload compacto enviado à IA, com as métricas do dia (totais e conversas). */
   input: DailyReportInput
+  /**
+   * Custo estimado × efetivo da geração, quando `config.showCosts` (só no `pnpm dev`). Em produção
+   * o `AiMeta.cost` nem é produzido, então fica ausente e a página não renderiza o painel.
+   */
+  cost?: CostInfo
 }
 
 /** Ponteiro do último relatório, o que basta para a página achar a data sem carregar tudo. */
@@ -97,6 +103,22 @@ export const toReportRef = (value: unknown): ReportRef | null => {
 }
 
 /**
+ * Normaliza o custo guardado com o relatório: só entra no `StoredReport` quando tem a forma de
+ * `{ estimate, effective }` (cada um objeto ou `null`). Qualquer outra coisa é descartada, como os
+ * demais campos — o painel só é lido no dev e um custo inválido não deve derrubar a página.
+ */
+const toCostInfo = (value: unknown): CostInfo | undefined => {
+  if (!value || typeof value !== "object") return undefined
+  const cost = value as Partial<CostInfo>
+  const part = (item: unknown) => item == null || typeof item === "object"
+  if (!part(cost.estimate) || !part(cost.effective)) return undefined
+  return {
+    estimate: (cost.estimate ?? null) as CostInfo["estimate"],
+    effective: (cost.effective ?? null) as CostInfo["effective"]
+  }
+}
+
+/**
  * Normaliza um relatório lido do storage. Registro corrompido (sem `report`/`input` ou com a data
  * de outra chave) é descartado com `null`, e a página mostra o estado vazio em vez de quebrar.
  */
@@ -114,13 +136,15 @@ export const toStoredReport = (value: unknown, date: string): StoredReport | nul
   ) {
     return null
   }
+  const cost = toCostInfo(stored.cost)
   return {
     date,
     generatedAt: stored.generatedAt,
     model: stored.model,
     promptVersion: stored.promptVersion,
     report: stored.report as DailyReport,
-    input: stored.input as DailyReportInput
+    input: stored.input as DailyReportInput,
+    ...(cost && { cost })
   }
 }
 

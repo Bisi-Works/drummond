@@ -280,7 +280,9 @@ export const DayWidget = ({ adapter }: Props) => {
       model: response.meta.model,
       promptVersion: response.meta.promptVersion,
       report: response.data,
-      input
+      input,
+      // Só existe no dev (`config.showCosts`); a página só renderiza o painel quando ele está lá.
+      cost: response.meta.cost
     })
     // Sem gravação (extensão recarregada/`chrome.storage` indisponível) não há o que a página
     // abriria: avisa e para aqui, sem abrir uma aba vazia nem consumir a cota do dia.

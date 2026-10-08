@@ -3,10 +3,12 @@ import "~style.css"
 import { useEffect, useLayoutEffect, useState } from "react"
 
 import { Wordmark } from "~components/Brand"
+import { CostPanel } from "~components/CostPanel"
 import { Spinner } from "~components/Spinner"
 import { ThemeToggle } from "~components/ThemeToggle"
 import { useTheme } from "~hooks/useTheme"
 import { registerBrandFont } from "~lib/brand-font"
+import { config } from "~lib/config"
 import {
   buildStandaloneHtml,
   formatDayLabel,
@@ -331,6 +333,14 @@ const ReportPage = () => {
               <SectionBlock title="Métricas do dia">
                 <MetricsGrid stored={state.stored} />
               </SectionBlock>
+
+              {/* Custo da geração: só no `pnpm dev` e quando o relatório guardou a estimativa.
+                  Fica fora do papel (`.no-print`) e some por completo em produção. */}
+              {config.showCosts && state.stored.cost && (
+                <section className="report-block no-print px-7 pt-6">
+                  <CostPanel cost={state.stored.cost} title="Custo desta geração" />
+                </section>
+              )}
 
               <footer className="report-footer mt-7 border-t border-line px-7 py-5 text-xs text-fg-subtle">
                 Relatório gerado por Drummond by BW — uso interno.

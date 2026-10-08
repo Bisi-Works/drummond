@@ -405,3 +405,82 @@ describe("generateDailyReport", () => {
     })
   })
 })
+
+// O mesmo painel de custo da revisão/coaching é reaproveitado no relatório: em dev o `AiMeta`
+// carrega a faixa estimada e o efetivo do `usage`; em produção nada disso é produzido (a chave
+// nem chega a buscar preços), e a página do relatório não renderiza o bloco.
+describe("custo do relatório (só no dev)", () => {
+  const endpoints = [
+    {
+      provider_name: "A",
+      supported_parameters: ["response_format", "structured_outputs", "reasoning", "temperature"],
+      pricing: { prompt: "0.0000001", completion: "0.0000004" }
+    },
+    {
+      provider_name: "B",
+      supported_parameters: ["response_format", "structured_outputs", "reasoning", "temperature"],
+      pricing: { prompt: "0.0000006", completion: "0.0000024" }
+    }
+  ]
+
+  // Roteia preços do modelo (API pública) × chamada do chat, como o `service.test.ts` faz.
+  const routeFetch = (content: unknown) => {
+    const fetchMock = vi.fn(async (url: string) =>
+      url.endsWith("/endpoints")
+        ? new Response(JSON.stringify({ data: { endpoints } }))
+        : new Response(
+            JSON.stringify({
+              provider: "DeepInfra",
+              choices: [
+                { message: { content: typeof content === "string" ? content : JSON.stringify(content) } }
+              ],
+              usage: { prompt_tokens: 1200, completion_tokens: 300, cost: 0.00042 }
+            })
+          )
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    return fetchMock
+  }
+
+  it("no dev, devolve a faixa estimada e o custo efetivo do relatório", async () => {
+    const { generateDailyReport } = await loadService({ NODE_ENV: "development" })
+    const fetchMock = routeFetch(reportFixture)
+
+    const { meta } = await generateDailyReport(reportInput)
+
+    expect(
+      fetchMock.mock.calls.some(
+        ([url]) => url === "https://openrouter.ai/api/v1/models/vendor/report-z/endpoints"
+      )
+    ).toBe(true)
+    expect(meta.cost?.estimate).toMatchObject({ outputTokens: 1200, providers: 2 })
+    expect(meta.cost!.estimate!.maxUsd).toBeGreaterThan(meta.cost!.estimate!.minUsd)
+    expect(meta.cost?.effective).toEqual({
+      usd: 0.00042,
+      inputTokens: 1200,
+      outputTokens: 300,
+      reasoningTokens: 0,
+      provider: "DeepInfra"
+    })
+  })
+
+  it("fora do dev, não busca preços nem devolve custo", async () => {
+    const { generateDailyReport } = await loadService({ NODE_ENV: "production" })
+    const fetchMock = routeFetch(reportFixture)
+
+    const { meta } = await generateDailyReport(reportInput)
+
+    expect(meta.cost).toBeUndefined()
+    expect(fetchMock.mock.calls.every(([url]) => !url.endsWith("/endpoints"))).toBe(true)
+  })
+
+  it("não devolve custo quando o dia não tem conversas (não chama o modelo)", async () => {
+    const { generateDailyReport } = await loadService({ NODE_ENV: "development" })
+    const fetchMock = routeFetch(reportFixture)
+
+    const result = await generateDailyReport(buildReportInput(day([]), NOW))
+
+    expect(result.meta.cost).toBeUndefined()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
