@@ -14,3 +14,6 @@ build/
 *.log
 *.tsbuildinfo
 coverage/
+
+# cache de sessao do hook de design (caminhos locais, muda a cada edicao)
+.impeccable/hook.cache.json

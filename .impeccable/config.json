@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "tests/fixtures/botconversa-inbox.html"
+        ],
+        "createdAt": "2026-10-08T13:39:34.888Z",
+        "reason": "fixture de teste que replica o DOM do Botconversa; img vazio pré-existente (template com imagem), nao e UI entregue; decidido pelo agente, nao confirmado pelo usuario"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "tests/botconversa.test.ts"
+        ],
+        "createdAt": "2026-10-08T13:40:05.288Z",
+        "reason": "HTML de teste do adapter com img vazio pre-existente (mensagem de midia), nao e UI entregue; decidido pelo agente, nao confirmado pelo usuario"
+      }
+    ]
+  }
+}
