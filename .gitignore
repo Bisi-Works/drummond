@@ -5,9 +5,10 @@ node_modules/
 build/
 .plasmo/
 
-# segredos — a chave do OpenRouter fica aqui
+# segredos — a chave do OpenRouter e as credenciais da Chrome Web Store
 .env
 .env.*.local
+.env.cws
 
 # misc
 .DS_Store

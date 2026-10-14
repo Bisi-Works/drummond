@@ -1,8 +1,8 @@
 # Drummond by BW
 
-Extensão de navegador (uso interno, não publicada) que revisa e dá coaching nas mensagens dos
-vendedores no **Botconversa**, usando o DeepSeek V4 Flash via **OpenRouter**. O nome é uma homenagem
-a Carlos Drummond de Andrade. A identidade visual segue a da [Bisi Works](https://bisi.works/):
+Extensão de navegador (uso interno, distribuída como item privado na Chrome Web Store) que revisa
+e dá coaching nas mensagens dos vendedores no **Botconversa**, usando o DeepSeek V4 Flash via
+**OpenRouter**. O nome é uma homenagem a Carlos Drummond de Andrade. A identidade visual segue a da [Bisi Works](https://bisi.works/):
 vermelho `#e7191f`, preto, branco e a fonte Geist. O logo é o retrato de Drummond e os óculos dele
 marcam o botão de revisão (artes em `assets/`). O tema escuro é o padrão; o botão de sol/lua no
 cabeçalho do painel lateral troca para o claro, e a escolha vale também para o card de revisão.
@@ -91,8 +91,14 @@ no `.env`, crie um perfil (ex.: `env/.env.teste`) só com as variáveis que quer
 pnpm build                          # configuração do .env
 pnpm build --env=env/.env.teste     # .env + o que o perfil sobrescreve
 pnpm check:bundle                   # executa a build gerada (ver abaixo)
-pnpm package                        # zip em build/ para enviar às pessoas que vão usar
+pnpm package                        # zip em build/ (o mesmo que vai para a loja)
 ```
+
+**Publicação.** A extensão é distribuída pela Chrome Web Store como item privado. `pnpm release`
+sobe a versão, roda o `pnpm verify`, envia o zip pela API da loja, submete para revisão e cria o
+commit e a tag. O Chrome dos vendedores atualiza sozinho depois da aprovação. A configuração
+inicial (conta, credenciais em `.env.cws`, textos da ficha e de privacidade) está em
+`docs/chrome-web-store.md`, e o material da loja está em `store/`.
 
 **Sempre rode `pnpm check:bundle` depois de `pnpm build`** (ou `pnpm verify`, que roda testes,
 typecheck, build e a checagem). A build de produção do Plasmo pode quebrar código que funciona
