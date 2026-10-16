@@ -10,8 +10,18 @@ const Row = ({ label, value, detail }: { label: string; value: string; detail?: 
   </div>
 )
 
-/** Custo estimado × efetivo de uma análise. Só é renderizado no `pnpm dev`. */
-export const CostPanel = ({ cost }: { cost: CostInfo }) => {
+/**
+ * Custo estimado × efetivo de uma análise. Só é renderizado no `pnpm dev`. O `title` permite
+ * reaproveitar o painel em tarefas diferentes (revisão/coaching × relatório diário) sem duplicar
+ * o layout de "estimado × efetivo".
+ */
+export const CostPanel = ({
+  cost,
+  title = "Custo desta análise"
+}: {
+  cost: CostInfo
+  title?: string
+}) => {
   const { estimate, effective } = cost
 
   const estimateValue = !estimate
@@ -30,7 +40,7 @@ export const CostPanel = ({ cost }: { cost: CostInfo }) => {
   return (
     <section className="rounded-lg border border-dashed border-amber-300 bg-amber-50/60 px-3 py-2 text-xs dark:border-amber-400/40 dark:bg-amber-400/10">
       <h2 className="mb-1.5 flex items-center gap-1.5 font-semibold text-amber-900 dark:text-amber-200">
-        Custo desta análise
+        {title}
         <span className="rounded bg-amber-200 px-1 dark:bg-amber-400/30 text-[10px] uppercase tracking-wide">dev</span>
       </h2>
       <dl className="space-y-1.5">

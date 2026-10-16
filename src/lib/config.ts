@@ -84,13 +84,58 @@ const coach: ModelConfig = {
   timeoutMs: 90_000
 }
 
+/** Relatório diário: roda uma vez por dia, então pode ser mais caro e demorar mais que a revisão. */
+const report: ModelConfig = {
+  model: process.env.PLASMO_PUBLIC_REPORT_MODEL || "deepseek/deepseek-v4-flash-0731",
+  temperature: toNumber(process.env.PLASMO_PUBLIC_REPORT_TEMPERATURE ?? "0.3"),
+  reasoning: toReasoning(process.env.PLASMO_PUBLIC_REPORT_REASONING ?? "off"),
+  responseFormat: toResponseFormatMode(process.env.PLASMO_PUBLIC_REPORT_RESPONSE_FORMAT ?? "json_schema"),
+  providerOrder: toProviderOrder(process.env.PLASMO_PUBLIC_REPORT_PROVIDER_ORDER ?? "cohere,parasail"),
+  timeoutMs: 90_000
+}
+
+/**
+ * Decisão "o cliente só encerrou a conversa?" (ver `lib/ai/jev.ts`): roda depois da regra de texto,
+ * só para mensagens curtas que ela não resolve. Falha ou dúvida = a conversa continua aguardando.
+ */
+const closing = {
+  /** `PLASMO_PUBLIC_CLOSING_AI=off` desliga a IA e deixa só a regra de texto. */
+  enabled: process.env.PLASMO_PUBLIC_CLOSING_AI !== "off",
+  model: process.env.PLASMO_PUBLIC_CLOSING_MODEL || "typesafe/jev-1.13",
+  /** Só dispensa a conversa quando P(não precisa de resposta) chega a este valor (0,5 a 0,999). */
+  threshold: Math.min(0.999, Math.max(0.5, toNumber(process.env.PLASMO_PUBLIC_CLOSING_THRESHOLD) ?? 0.95)),
+  timeoutMs: 8_000
+}
+
 export const config = {
   review,
   coach,
+  report,
+  closing,
   contextMessages: toNumber(process.env.PLASMO_PUBLIC_CONTEXT_MESSAGES) ?? 20,
   /** O coaching olha a conversa inteira carregada na tela, até este limite. */
   coachMessages: 80,
   denyDataCollection: process.env.PLASMO_PUBLIC_DENY_DATA_COLLECTION !== "false",
+  /** De quanto em quanto tempo a inbox é relida (só com a aba visível). */
+  inboxPollMs: toNumber(process.env.PLASMO_PUBLIC_INBOX_POLL_MS) ?? 60_000,
+  /**
+   * Só para teste: lista os chats de outro membro da equipe (`user_id_filter`) em vez de "meus
+   * chats". Serve a quem testa com uma conta de gestor, que não tem chats atribuídos.
+   */
+  inboxUserId: toNumber(process.env.PLASMO_PUBLIC_INBOX_USER_ID),
+  /**
+   * Quantos relatórios por dia o vendedor pode gerar em produção (ver `canGenerateReport`).
+   * Padrão 1: um relatório por dia, que é o custo previsto do recurso.
+   */
+  reportLimitPerDay: toNumber(process.env.PLASMO_PUBLIC_REPORT_LIMIT_PER_DAY) ?? 1,
+  /**
+   * Libera a trava diária. `true` por padrão no `pnpm dev` (para repetir os testes sem consumir a
+   * cota) ou quando `PLASMO_PUBLIC_REPORT_UNLIMITED=true` — que só deve existir numa build de
+   * homologação, nunca na de produção dos vendedores.
+   */
+  reportUnlimited:
+    process.env.NODE_ENV === "development" ||
+    process.env.PLASMO_PUBLIC_REPORT_UNLIMITED === "true",
   /** Custo estimado/efetivo das análises: só no `pnpm dev` (NODE_ENV vem do Parcel/Plasmo). */
   showCosts: process.env.NODE_ENV === "development"
 } as const

@@ -1,18 +1,28 @@
 import type { ChatMessage } from "~adapters/types"
 import { config, type ModelConfig } from "~lib/config"
+import type { DailyReportInput } from "~lib/tracking/report"
 
 import { estimateCost, estimateTokens, pricingRange, type CostEstimate, type CostInfo } from "./cost"
 import { chatCompletion, fetchModelEndpoints, OpenRouterError } from "./openrouter"
 import { parseModelJson } from "./parse"
-import { buildCoachPrompt, buildReviewPrompt, PROMPT_VERSION, type PromptMessages } from "./prompts"
+import {
+  buildCoachPrompt,
+  buildDailyReportPrompt,
+  buildReviewPrompt,
+  PROMPT_VERSION,
+  type PromptMessages
+} from "./prompts"
 import {
   coachingReportSchema,
+  dailyReportSchema,
   draftReviewSchema,
   limitCoaching,
+  limitDailyReport,
   limitReview,
   toResponseFormat,
   type BantItem,
   type CoachingReport,
+  type DailyReport,
   type DraftReview
 } from "./schemas"
 
@@ -105,9 +115,11 @@ const complete = async (
 }
 
 // Heurísticas de saída para a estimativa: o texto revisado tem ~o tamanho do rascunho, mais
-// mudanças/alertas; o coaching é limitado a 5 melhorias + resumo + BANT + próximo passo.
+// mudanças/alertas; o coaching é limitado a 5 melhorias + resumo + BANT + próximo passo; o
+// relatório tem o resumo do dia + 4 listas de até 5 itens (por isso ~1200 tokens).
 const REVIEW_OVERHEAD_TOKENS = 150
 const COACHING_OUTPUT_TOKENS = 1000
+const REPORT_OUTPUT_TOKENS = 1200
 
 const reviewFormat = toResponseFormat("draft_review", draftReviewSchema, config.review.responseFormat)
 const coachingFormat = toResponseFormat(
@@ -115,6 +127,7 @@ const coachingFormat = toResponseFormat(
   coachingReportSchema,
   config.coach.responseFormat
 )
+const reportFormat = toResponseFormat("daily_report", dailyReportSchema, config.report.responseFormat)
 
 // Garante coerência entre status e texto: "ok" nunca altera o rascunho, e uma sugestão idêntica ao
 // original é tratada como "ok" (alguns modelos marcam "ajustes" sem mudar nada).
@@ -193,4 +206,32 @@ export const coachConversation = (conversation: ChatMessage[], stream: StreamOpt
     return limitCoaching(
       dropInvalidImprovements(parseModelJson(raw, coachingReportSchema), conversation)
     )
+  })
+
+/**
+ * Relatório do dia: uma única chamada sobre o resumo do tracking (nunca as conversas completas),
+ * sem streaming — roda uma vez por dia no background. `buildReportInput` já descarta as conversas
+ * sem nenhuma mensagem, então uma lista vazia significa que não há o que avaliar: devolve um
+ * relatório coerente sem chamar (nem pagar) o modelo, como o `coachConversation` sem mensagens do
+ * vendedor.
+ */
+export const generateDailyReport = (input: DailyReportInput) =>
+  run(config.report, async (ctx): Promise<DailyReport> => {
+    if (input.conversations.length === 0) {
+      return {
+        resumo: "Nenhuma conversa com mensagens foi acompanhada neste dia.",
+        acertos: [],
+        erros: [],
+        melhorias: [],
+        pendencias: []
+      }
+    }
+    const raw = await complete(
+      ctx,
+      config.report,
+      buildDailyReportPrompt(input),
+      reportFormat,
+      REPORT_OUTPUT_TOKENS
+    )
+    return limitDailyReport(parseModelJson(raw, dailyReportSchema))
   })

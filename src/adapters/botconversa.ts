@@ -1,3 +1,6 @@
+import { config } from "~lib/config"
+
+import { listBotconversaChats, listBotconversaMessages } from "./botconversa-api"
 import { cleanText, readComposerText, setComposerText } from "./dom"
 import type { ChatAdapter, ChatAuthor, ChatMessage } from "./types"
 
@@ -199,6 +202,29 @@ export const readBotconversaConversation = (root: ParentNode, limit: number): Ch
   return messages.slice(-limit).map((m, index) => ({ id: index + 1, ...m }))
 }
 
+/** Nomes de contato maiores que isso são lixo de DOM (ou um texto que não é nome). */
+const CONTACT_NAME_MAX = 80
+
+/**
+ * Nome do contato no cabeçalho do chat (mapeado em 08/10/2026): o cabeçalho é o primeiro filho de
+ * `_chatArea_` (`_root_`), e o nome fica em `_details_ > _content_ > .paragraph-small`. Os mesmos
+ * elementos de mensagem também usam `.paragraph-small`, mas ficam fora de `_details_`.
+ */
+export const readBotconversaContactName = (root: ParentNode): string | null => {
+  const el = root.querySelector(
+    `${mod("chatArea")} > ${mod("root")} ${mod("details")} ${mod("content")} ${SELECTORS.body}`
+  )
+  const name = cleanText(el?.textContent).replace(/\s+/g, " ")
+  return name && name.length <= CONTACT_NAME_MAX ? name : null
+}
+
+const apiDeps = () => ({
+  fetch: (...args: Parameters<typeof fetch>) => fetch(...args),
+  storage: localStorage,
+  pathname: location.pathname,
+  userIdFilter: config.inboxUserId
+})
+
 export const botconversaAdapter: ChatAdapter = {
   id: "botconversa",
   hosts: ["app.botconversa.com.br"],
@@ -228,6 +254,12 @@ export const botconversaAdapter: ChatAdapter = {
   },
 
   readConversation: (limit) => readBotconversaConversation(document, limit),
+
+  getContactName: () => readBotconversaContactName(document),
+
+  listMyChats: (since) => listBotconversaChats(since, apiDeps()),
+
+  listRecentMessages: (key, limit) => listBotconversaMessages(key, limit, apiDeps()),
 
   getConversationKey: () => new URL(location.href).searchParams.get("chat_id") ?? location.pathname
 }

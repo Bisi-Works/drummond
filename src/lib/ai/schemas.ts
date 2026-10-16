@@ -12,6 +12,7 @@ import {
   impactLevels,
   MAX_CHANGES,
   MAX_IMPROVEMENTS,
+  MAX_REPORT_ITEMS,
   MAX_STRENGTHS,
   type ImpactLevel
 } from "./constants"
@@ -92,9 +93,34 @@ export const coachingReportSchema = z.object({
     .describe("O que o vendedor deveria fazer ou escrever a seguir, de forma concreta.")
 })
 
+// Relatório individual do dia: uma chamada de IA sobre o resumo compacto do tracking (nunca a
+// conversa completa). As listas são limitadas depois do parse, como em `limitReview`/`limitCoaching`.
+export const dailyReportSchema = z.object({
+  resumo: z.string().describe("1–2 frases sobre como o dia foi, no conjunto das conversas."),
+  acertos: z
+    .array(z.string())
+    .describe(
+      `Até ${MAX_REPORT_ITEMS} acertos concretos do vendedor no dia, citando a conversa quando fizer sentido.`
+    ),
+  erros: z
+    .array(z.string())
+    .describe(
+      `Até ${MAX_REPORT_ITEMS} erros ou padrões a evitar, sempre a partir do que está nos dados.`
+    ),
+  melhorias: z
+    .array(z.string())
+    .describe(`Até ${MAX_REPORT_ITEMS} melhorias práticas para os próximos dias.`),
+  pendencias: z
+    .array(z.string())
+    .describe(
+      `Até ${MAX_REPORT_ITEMS} pendências que ficaram em aberto para amanhã, por conversa.`
+    )
+})
+
 export type DraftReview = z.infer<typeof draftReviewSchema>
 export type CoachingReport = z.infer<typeof coachingReportSchema>
 export type BantItem = z.infer<typeof bantItemSchema>
+export type DailyReport = z.infer<typeof dailyReportSchema>
 
 // Em `json_object` o schema não vai na requisição: o formato fica a cargo do prompt (que descreve o
 // JSON esperado) e da validação com zod depois do parse.
@@ -120,4 +146,13 @@ export const limitCoaching = (report: CoachingReport): CoachingReport => ({
   improvements: [...report.improvements]
     .sort((a, b) => impactOrder[a.impact] - impactOrder[b.impact])
     .slice(0, MAX_IMPROVEMENTS)
+})
+
+/** Trunca as quatro listas do relatório diário em `MAX_REPORT_ITEMS`, preservando a ordem. */
+export const limitDailyReport = (report: DailyReport): DailyReport => ({
+  ...report,
+  acertos: report.acertos.slice(0, MAX_REPORT_ITEMS),
+  erros: report.erros.slice(0, MAX_REPORT_ITEMS),
+  melhorias: report.melhorias.slice(0, MAX_REPORT_ITEMS),
+  pendencias: report.pendencias.slice(0, MAX_REPORT_ITEMS)
 })

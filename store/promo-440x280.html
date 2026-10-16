@@ -1,0 +1,38 @@
+<!doctype html>
+<!-- Imagem promocional pequena da Chrome Web Store (440x280). Para regerar o PNG:
+     chrome --headless --hide-scrollbars --window-size=440,280 --screenshot=store/promo-440x280.png store/promo-440x280.html -->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face {
+    font-family: "Geist";
+    src: url("../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format("woff2");
+    font-weight: 100 900;
+  }
+  html, body { margin: 0; width: 440px; height: 280px; overflow: hidden; }
+  body {
+    background: #000;
+    color: #fff;
+    font-family: "Geist", sans-serif;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 0 32px 0 20px;
+    box-sizing: border-box;
+  }
+  img { width: 168px; height: 168px; flex: none; }
+  h1 { margin: 0; font-size: 40px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; }
+  .by { margin-top: 6px; font-size: 16px; font-weight: 500; color: #e7191f; letter-spacing: 0.02em; }
+  p { margin: 18px 0 0; font-size: 15px; line-height: 1.35; color: #bdbdbd; }
+</style>
+</head>
+<body>
+  <img src="../assets/icon.png" alt="">
+  <div>
+    <h1>Drummond</h1>
+    <div class="by">by Bisi Works</div>
+    <p>Revisão e coaching de mensagens de vendas no Botconversa.</p>
+  </div>
+</body>
+</html>

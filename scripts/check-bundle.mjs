@@ -92,11 +92,46 @@ const fakeModel = {
       timing: { status: "pendente", evidence: "Não abordado.", question: "Para quando precisa?" }
     },
     nextStep: "Enviar proposta."
+  },
+  // Relatório diário da rota "generate-report" (e do botão "Encerrar o dia" no widget).
+  daily: {
+    resumo: "Dia produtivo, com uma pendência.",
+    acertos: ["Respondeu rápido a Loja X."],
+    erros: [],
+    melhorias: ["Retomar a conversa parada na segunda-feira."],
+    pendencias: ["Falar com a Loja X."]
   }
+}
+// Payload do dia usado na rota `generate-report` e no `input` guardado com o relatório, para a
+// página do relatório remontar as métricas sem nova chamada de IA.
+const dailyInput = {
+  date: "2026-10-07",
+  totals: {
+    conversations: 1, waiting: 1, answered: 0, withoutMessage: 0, reviews: 0, coachings: 0,
+    alerts: 1, waitingByLevel: { verde: 0, amarelo: 0, laranja: 1, vermelho: 0 },
+    averageFirstResponseMs: null, averageResponseMs: null
+  },
+  conversations: [{
+    key: "1", label: "Loja X", platform: "botconversa", lastMessageAuthor: "cliente",
+    lastMessage: "Oi", messageCount: 2,
+    status: { state: "aguardando", elapsedMs: 90_000, level: "laranja" }
+  }]
 }
 const requests = []
 const priceLookups = []
+const decisionRequests = []
 const fetchStub = async (url, init) => {
+  // Decisions API (Jev): responde como o OpenRouter, com as probabilidades da pergunta única.
+  if (url.endsWith("/api/alpha/decisions")) {
+    const body = JSON.parse(init.body)
+    decisionRequests.push({ body, authorization: new Headers(init.headers).get("Authorization") })
+    const p = body.state.conversa.at(-1).texto.includes("Obrigado") ? 0.99 : 0.2
+    return new Response(JSON.stringify({
+      model: "typesafe/jev-1.13-20260917", provider: "TypeSafe", usage: { input_tokens: 410, output_tokens: 44, cost: 0.0000172 },
+      answers: { reply: { type: "choice", choice: p > 0.5 ? "nao_precisa_resposta" : "precisa_resposta", confidence: 1,
+        probabilities: { nao_precisa_resposta: p, precisa_resposta: 1 - p } } }
+    }))
+  }
   // Preços do modelo (API pública), usados só na estimativa de custo do dev.
   if (url.endsWith("/endpoints")) {
     priceLookups.push(url)
@@ -106,8 +141,10 @@ const fetchStub = async (url, init) => {
   }
   const body = JSON.parse(init.body)
   requests.push(body)
-  const isReview = body.messages[0].content.includes("Tarefa: revisar o rascunho")
-  const content = JSON.stringify(isReview ? fakeModel.review : fakeModel.coach)
+  const system = body.messages[0].content
+  const isReview = system.includes("Tarefa: revisar o rascunho")
+  const isDaily = system.includes("Tarefa: relatório diário de coaching")
+  const content = JSON.stringify(isReview ? fakeModel.review : isDaily ? fakeModel.daily : fakeModel.coach)
   const usage = { prompt_tokens: 1000, completion_tokens: 200, cost: 0.00054 }
   if (!body.stream) {
     return new Response(JSON.stringify({ provider: "Fake", usage, choices: [{ message: { content } }] }))
@@ -172,6 +209,33 @@ try {
   check(validFormat(reviewRequest, "status,warnings,suggestedText,changes"), `formato de resposta do review vai completo (${reviewRequest?.response_format?.type})`)
   check(reviewRequest?.provider?.require_parameters === true && !reviewRequest?.stream, `review: requisição exige provedor compatível, sem streaming (${describeRequest(reviewRequest)})`)
 
+  // Rota do relatório diário, pelo mesmo caminho que o widget do content script usa
+  // (`sendToBackground("generate-report")`): o handler é descoberto pelo nome do arquivo em
+  // `src/background/messages/`, sem registro manual no `background/index.ts`.
+  const daily = await deliver(listeners, { name: "generate-report", body: { report: dailyInput } })
+  check(daily?.ok === true && daily.data.resumo === fakeModel.daily.resumo, `generate-report responde (${daily?.ok ? "ok" : daily?.error})`)
+  const dailyRequest = requests.at(-1)
+  check(validFormat(dailyRequest, "resumo,acertos,erros,melhorias,pendencias"), `formato de resposta do relatório diário (${dailyRequest?.response_format?.type})`)
+  // Custo do relatório: só o dev calcula a estimativa e recebe o `usage.cost`. A build de produção
+  // não pode embutir esse caminho — a checagem falha se `meta.cost` aparecer na resposta.
+  if (isDevBuild) {
+    const reportCost = daily?.meta?.cost
+    check(!!reportCost?.estimate && reportCost?.effective?.usd === 0.00054, `dev: custo estimado e efetivo do relatório diário (${JSON.stringify(reportCost?.effective ?? null)})`)
+  } else {
+    check(daily?.meta?.cost === undefined, "produção: relatório diário sem custo na resposta")
+  }
+
+  // Decisão "o cliente só encerrou?" (Jev): mesma passagem pelo background, nunca pelo content script.
+  const closeYes = await deliver(listeners, { name: "classify-closing", body: { previous: "Qualquer dúvida é só chamar!", text: "Obrigado!" } })
+  const closeNo = await deliver(listeners, { name: "classify-closing", body: { previous: "Posso te ligar?", text: "ok" } })
+  check(closeYes?.ok === true && closeYes.closing === true && closeNo?.ok === true && closeNo.closing === false,
+    `classify-closing decide pelo limiar (${closeYes?.pNoReply} → dispensa, ${closeNo?.pNoReply} → aguarda)`)
+  const decision = decisionRequests[0]
+  check(decision?.body.provider?.data_collection === "deny" && decision?.authorization === `Bearer ${key}`,
+    "classify-closing: política de dados 'deny' e chave só enviada ao OpenRouter")
+  check(decision?.body.state.conversa.length === 2 && decision.body.questions.reply.type === "choice",
+    "classify-closing: estado com a mensagem anterior do vendedor e pergunta Choice")
+
   check(connectListeners.length > 0, "service worker registra o listener de conexões (coaching)")
   const messages = await connect(connectListeners, "coach-conversation", { conversation })
   const deltas = messages.filter((m) => m.type === "delta")
@@ -192,6 +256,16 @@ try {
   check(false, `service worker executa sem erro: ${error.stack ?? error}`)
 }
 
+// O endpoint da Decisions API e a pergunta ao Jev só podem existir no background: o content script
+// e o painel falam com ele pela rota "classify-closing".
+{
+  const stray = walk(buildDir).filter((file) => {
+    const rel = relative(buildDir, file)
+    return !rel.startsWith(`static${sep}background`) && file.endsWith(".js") && readFileSync(file, "utf8").includes("api/alpha/decisions")
+  })
+  check(stray.length === 0, `endpoint da Decisions API só no background${stray.length ? ` (vazou em ${stray.map((f) => relative(buildDir, f)).join(", ")})` : ""}`)
+}
+
 // 3. Content script ----------------------------------------------------------------------------
 try {
   const script = manifest.content_scripts?.[0]
@@ -208,6 +282,11 @@ try {
 
   check(errors.length === 0, `content script executa sem erro${errors.length ? `: ${errors[0]}` : ""}`)
   check(!!window.document.querySelector("plasmo-csui"), "content script monta a UI na página")
+  const contentBundle = script.js.map(read).join("")
+  check(
+    contentBundle.includes("generate-report") && contentBundle.includes("open-report"),
+    "content script referencia as rotas generate-report/open-report (sem a chave da API)"
+  )
   const response = await deliver(listeners, { name: "get-conversation" })
   check(response?.conversation?.length === 10 && response.conversationKey === "123", `get-conversation lê a conversa (${response?.conversation?.length ?? 0} mensagens)`)
   await window.happyDOM.close()
@@ -282,6 +361,139 @@ try {
   await window.happyDOM.close()
 } catch (error) {
   check(false, `side panel executa sem erro: ${error.stack ?? error}`)
+}
+
+// 5. Trava diária, widget e página do relatório --------------------------------------------------
+// Executa a build de verdade para provar as garantias da fase: em produção o widget bloqueia a
+// segunda geração do dia (cota consumida), o relatório não leva custo e a busca de preços não
+// roda; em dev a cota fica livre (para testar) e o custo aparece. A data é a local de hoje, a
+// mesma que `dayKey()` calcula no navegador.
+
+const today = (() => {
+  const now = new Date()
+  const pad = (n) => String(n).padStart(2, "0")
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+})()
+
+const REPORT_GENERATED_PREFIX = "drummond.report.generated."
+const REPORT_DATE = "2026-10-07"
+
+/** `chrome` com um `storage.local` em memória (semeado): o mínimo para a trava e a página. */
+const chromeWithStorage = (seed = {}) => {
+  const store = { ...seed }
+  const area = {
+    get: async (keys) =>
+      keys == null
+        ? { ...store }
+        : typeof keys === "string"
+          ? { [keys]: store[keys] }
+          : Object.fromEntries(keys.map((key) => [key, store[key]])),
+    set: async (items) => Object.assign(store, items),
+    remove: async (key) => {
+      delete store[key]
+    }
+  }
+  const { chrome } = chromeStub()
+  chrome.storage = {
+    local: area,
+    onChanged: { addListener: () => {}, removeListener: () => {} }
+  }
+  return chrome
+}
+
+// 5a. Widget do dia no content script ------------------------------------------------------------
+try {
+  const contentScript = manifest.content_scripts?.[0]
+  const window = new Window({ url: "https://app.botconversa.com.br/1/inbox?chat_id=123" })
+  window.document.write(readFileSync("tests/fixtures/botconversa-inbox.html", "utf8"))
+  // Cota do dia já consumida: produção tem que travar o botão; dev ignora a trava de propósito.
+  window.chrome = chromeWithStorage({
+    [`${REPORT_GENERATED_PREFIX}${today}`]: { generatedAt: Date.now(), count: 1 }
+  })
+
+  const errors = []
+  window.addEventListener("error", (event) => errors.push(event.error ?? event.message))
+  for (const file of contentScript.js) window.eval(read(file))
+  await new Promise((resolve) => setTimeout(resolve, 400))
+
+  // A UI do content script vive num shadow DOM (`plasmo-csui`).
+  const root = window.document.querySelector("plasmo-csui")?.shadowRoot ?? window.document
+  const labels = Array.from(root.querySelectorAll("button")).map((button) => button.textContent.trim())
+  const expected = isDevBuild ? "Encerrar o dia" : "Relatório de hoje já gerado"
+  const warning = (root.textContent ?? "").includes("A cota de um relatório por dia já foi usada")
+  check(labels.includes(expected), `widget ${isDevBuild ? "dev" : "produção"}: botão do dia em "${expected}" (${labels.join(" · ") || "nenhum botão"})`)
+  check(warning === !isDevBuild, `widget ${isDevBuild ? "dev" : "produção"}: aviso da cota ${isDevBuild ? "ausente" : "presente"}`)
+  // Limpar os dados salvos apaga relatórios e a cota diária: só pode existir na build de dev.
+  const clearLabel = "Limpar dados salvos (dev)"
+  check(
+    labels.includes(clearLabel) === isDevBuild,
+    `widget ${isDevBuild ? "dev" : "produção"}: botão "${clearLabel}" ${isDevBuild ? "presente" : "ausente"}`
+  )
+  if (!isDevBuild) {
+    const emitted = contentScript.js.map((file) => read(file)).join("\n")
+    check(!emitted.includes("Apagar tudo (dev)"), "produção: o código de limpeza dos dados não vai para o bundle")
+  }
+  check(errors.length === 0, `widget executa sem erro${errors.length ? `: ${errors[0]}` : ""}`)
+  await window.happyDOM.close()
+} catch (error) {
+  check(false, `widget executa sem erro: ${error.stack ?? error}`)
+}
+
+// 5b. Página do relatório (tabs/report.html) ------------------------------------------------------
+try {
+  const reportHtml = read("tabs/report.html")
+  const reportScript = reportHtml.match(/<script src="\/([^"]+)"/)?.[1]
+  check(!!reportScript, "página do relatório: script emitido na build")
+
+  const render = async (url, seed) => {
+    const window = new Window({ url })
+    window.document.write('<div id="__plasmo"></div>')
+    window.chrome = chromeWithStorage(seed)
+    const errors = []
+    window.addEventListener("error", (event) => errors.push(event.error ?? event.message))
+    window.eval(read(reportScript))
+    // O script é `defer`: no navegador ele roda antes do DOMContentLoaded, que dispara o mount.
+    window.document.dispatchEvent(new window.Event("DOMContentLoaded", { bubbles: true }))
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    return { window, errors }
+  }
+
+  const empty = await render("chrome-extension://smoke-test/tabs/report.html", {})
+  const emptyText = empty.window.document.body.textContent
+  check(
+    empty.errors.length === 0 && emptyText.includes("Ainda não há nenhum relatório gerado neste navegador."),
+    `página do relatório renderiza o estado vazio${empty.errors.length ? `: ${empty.errors[0]}` : ""}`
+  )
+  await empty.window.happyDOM.close()
+
+  // Relatório salvo (o que a aba abre com `?date=`): as seções aparecem e o custo só no dev.
+  const stored = {
+    date: REPORT_DATE,
+    generatedAt: Date.now(),
+    model: "fake/model",
+    promptVersion: "v1",
+    report: fakeModel.daily,
+    input: dailyInput,
+    cost: {
+      estimate: { inputTokens: 1000, outputTokens: 200, minUsd: 0.0003, maxUsd: 0.0005, providers: 1 },
+      effective: { usd: 0.00054, inputTokens: 1000, outputTokens: 200, reasoningTokens: 0, provider: "Fake" }
+    }
+  }
+  const ready = await render(`chrome-extension://smoke-test/tabs/report.html?date=${REPORT_DATE}`, {
+    [`drummond.report.${REPORT_DATE}`]: stored
+  })
+  const readyText = ready.window.document.body.textContent
+  check(
+    ready.errors.length === 0 && readyText.includes("Resumo geral") && readyText.includes(fakeModel.daily.resumo),
+    `página do relatório renderiza o relatório salvo${ready.errors.length ? `: ${ready.errors[0]}` : ""}`
+  )
+  check(
+    readyText.includes("Custo desta geração") === isDevBuild,
+    `página do relatório ${isDevBuild ? "dev mostra" : "produção esconde"} o custo desta geração`
+  )
+  await ready.window.happyDOM.close()
+} catch (error) {
+  check(false, `página do relatório executa sem erro: ${error.stack ?? error}`)
 }
 
 if (failures.length > 0) {

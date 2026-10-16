@@ -7,6 +7,7 @@ import type { ChatMessage } from "~adapters/types"
 import { Wordmark } from "~components/Brand"
 import { CoachingReport } from "~components/CoachingReport"
 import { CostPanel } from "~components/CostPanel"
+import { DayOverview } from "~components/DayOverview"
 import { MetaFooter } from "~components/MetaFooter"
 import { Spinner } from "~components/Spinner"
 import { ThemeToggle } from "~components/ThemeToggle"
@@ -22,6 +23,8 @@ import {
   type CoachResponse,
   type GetConversationResponse
 } from "~lib/messages"
+import { coachingSignal } from "~lib/tracking/signals"
+import { recordCoaching } from "~lib/tracking/store"
 
 registerBrandFont()
 
@@ -78,7 +81,7 @@ const SidePanel = () => {
   const analyze = async () => {
     try {
       setState({ kind: "loading", step: "Lendo a conversa…" })
-      const { conversation } = await readActiveConversation()
+      const { conversation, conversationKey } = await readActiveConversation()
       if (conversation.length === 0) {
         throw new Error("A conversa aberta não tem mensagens visíveis para analisar.")
       }
@@ -91,6 +94,10 @@ const SidePanel = () => {
         )
       )
       setState({ kind: "done", messageCount, response })
+      // A análise já foi feita: só se anexa o sinal à conversa lida, sem chamada de IA nova.
+      if (response.ok && conversationKey) {
+        void recordCoaching(conversationKey, coachingSignal(response.data, Date.now()))
+      }
     } catch (error) {
       setState({ kind: "error", message: error instanceof Error ? error.message : String(error) })
     }
@@ -127,6 +134,10 @@ const SidePanel = () => {
       </header>
 
       <div className="flex-1 space-y-4 px-4 py-4">
+        <DayOverview />
+
+        <hr className="border-line" />
+
         {state.kind === "idle" && (
           <p className="text-sm text-fg-muted">
             Abra uma conversa no Botconversa e clique em “Analisar conversa atual”. A análise considera

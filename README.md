@@ -1,8 +1,8 @@
 # Drummond by BW
 
-Extensão de navegador (uso interno, não publicada) que revisa e dá coaching nas mensagens dos
-vendedores no **Botconversa**, usando o DeepSeek V4 Flash via **OpenRouter**. O nome é uma homenagem
-a Carlos Drummond de Andrade. A identidade visual segue a da [Bisi Works](https://bisi.works/):
+Extensão de navegador (uso interno, distribuída como item privado na Chrome Web Store) que revisa
+e dá coaching nas mensagens dos vendedores no **Botconversa**, usando o DeepSeek V4 Flash via
+**OpenRouter**. O nome é uma homenagem a Carlos Drummond de Andrade. A identidade visual segue a da [Bisi Works](https://bisi.works/):
 vermelho `#e7191f`, preto, branco e a fonte Geist. O logo é o retrato de Drummond e os óculos dele
 marcam o botão de revisão (artes em `assets/`). O tema escuro é o padrão; o botão de sol/lua no
 cabeçalho do painel lateral troca para o claro, e a escolha vale também para o card de revisão.
@@ -16,6 +16,24 @@ cabeçalho do painel lateral troca para o claro, e a escolha vale também para o
   vendedor qualificou o lead. Cada critério aparece como cumprido, parcial ou pendente, e os que
   faltam vêm com uma pergunta pronta para fazer ao cliente. A análise aparece aos poucos, conforme
   o modelo escreve (streaming).
+- **Widget do dia**: um painel flutuante e arrastável (posição e minimizado são lembrados) lista as
+  conversas abertas no dia, com um chip de tempo de espera (verde → vermelho) desde a última
+  mensagem do cliente. Um badge no cabeçalho conta as conversas em alerta (laranja/vermelho), essas
+  linhas sobem para o topo com destaque colorido, e o rodapé traz os totais do dia (acompanhadas,
+  aguardando, respondidas) e a média até a primeira resposta. O registro é local
+  (`chrome.storage.local`), sincroniza entre as abas e não faz nenhuma chamada de IA: revisões e
+  coachings já feitos aparecem anexados à conversa. À meia-noite o widget recomeça no dia novo sem
+  apagar o anterior (que continua no storage, consultável pelo relatório), e cada gravação junta o
+  dia ao que já está salvo — duas abas em conversas diferentes não se sobrescrevem.
+- **Resumo do dia no painel**: acima da análise, o painel lateral abre com os mesmos totais do
+  widget (acompanhadas, aguardando, respondidas, revisões, coachings e médias) e a fila de atenção
+  com chips coloridos e tempo de espera. Lê o mesmo `chrome.storage.local`, então widget e painel
+  ficam coerentes entre abas; sem conversas no dia, mostra "Nenhuma conversa acompanhada hoje".
+- **Relatório diário**: o botão **Encerrar o dia** do widget resume o que o tracking acumulou
+  (chats abertos, tempos de espera, revisões e coachings) e pede ao modelo um relatório do dia.
+  O resultado abre em uma página própria da extensão (`tabs/report.html`), de onde o vendedor o
+  leva embora como **PDF** (Imprimir → Salvar em PDF, layout A4), **HTML autocontido** ou cópia do
+  JSON. Em produção cada vendedor gera **um por dia**; no dev a trava fica livre para testes.
 
 Stack: [Plasmo](https://docs.plasmo.com/) (React + TypeScript), Tailwind CSS 3 e OpenRouter.
 
@@ -36,7 +54,7 @@ cp .env.example .env   # e preencha PLASMO_PUBLIC_OPENROUTER_API_KEY
 
 ```sh
 pnpm dev        # gera build/chrome-mv3-dev com hot reload
-pnpm test       # vitest: prompts, parse (inclusive o JSON parcial do streaming), serviço e adapter do Botconversa (fixture HTML)
+pnpm test       # vitest: prompts, parse (inclusive o JSON parcial do streaming), serviço, adapter do Botconversa (fixture HTML) e tracking do dia (data local, virada de dia, semáforo de espera, redutores, merge entre abas, persistência no storage com stub de `chrome` e agregações)
 pnpm typecheck
 ```
 
@@ -73,16 +91,28 @@ no `.env`, crie um perfil (ex.: `env/.env.teste`) só com as variáveis que quer
 pnpm build                          # configuração do .env
 pnpm build --env=env/.env.teste     # .env + o que o perfil sobrescreve
 pnpm check:bundle                   # executa a build gerada (ver abaixo)
-pnpm package                        # zip em build/ para enviar às pessoas que vão usar
+pnpm package                        # zip em build/ (o mesmo que vai para a loja)
 ```
+
+**Publicação.** A extensão é distribuída pela Chrome Web Store como item privado. `pnpm release`
+sobe a versão, roda o `pnpm verify`, envia o zip pela API da loja, submete para revisão e cria o
+commit e a tag. O Chrome dos vendedores atualiza sozinho depois da aprovação. A configuração
+inicial (conta, credenciais em `.env.cws`, textos da ficha e de privacidade) está em
+`docs/chrome-web-store.md`, e o material da loja está em `store/`.
 
 **Sempre rode `pnpm check:bundle` depois de `pnpm build`** (ou `pnpm verify`, que roda testes,
 typecheck, build e a checagem). A build de produção do Plasmo pode quebrar código que funciona
 no `pnpm dev`: o tree-shaking do Parcel e o SWC antigo já descartaram o zod e corromperam uma
 regex. Por isso a checagem não só compila, ela **executa** os bundles em um navegador simulado:
-service worker (com OpenRouter falso, inclusive o streaming), content script (com a fixture do
-Botconversa) e side panel (com o relatório chegando aos pedaços). Ela também confere que a chave
-só está no background. O modelo ativo e a versão do prompt aparecem no rodapé do card e do painel.
+service worker (com OpenRouter falso, inclusive o streaming, e as rotas `review-draft` e
+`generate-report`), content script (com a fixture do Botconversa), side panel (com o relatório
+chegando aos pedaços) e a página `tabs/report.html` (estado vazio e relatório salvo). Entre as
+garantias que ela confere: a chave só está no background; o bundle do content script referencia as
+rotas `generate-report`/`open-report`; o relatório não leva custo e a busca de preços não roda em
+produção (nem na resposta do coaching), mas o custo aparece no dev; e a trava diária — com a cota
+do dia consumida no `chrome.storage`, o widget de produção mostra "Relatório de hoje já gerado" e
+o de dev continua liberado ("Encerrar o dia"). O modelo ativo e a versão do prompt aparecem no
+rodapé do card e do painel.
 
 **Provedores.** O mesmo modelo roda em vários provedores, com preço e velocidade bem diferentes.
 Sem orientação, o OpenRouter prioriza os mais baratos. Para o DeepSeek V4 Flash, o mais barato
@@ -151,6 +181,28 @@ coaching ainda é subjetivo em condução (por exemplo, cobrar prazo de quem diz
 analisando"). O filtro `dropInvalidImprovements` (`service.ts`) descarta melhorias sobre mensagens
 que não são texto do vendedor, com trecho inexistente ou sugestão igual ao original.
 
+## Relatório diário
+
+Ao fim do dia, o widget mostra **Encerrar o dia**: ele resume o que o tracking local já acumulou
+(chats abertos, tempos de espera, revisões e coachings anexados) e pede ao modelo um relatório do
+dia. O resultado abre em uma **página própria da extensão** (`tabs/report.html`), com o tema da
+extensão e layout de impressão A4, e sai dali como PDF, HTML autocontido ou JSON.
+
+- A conversa completa nunca vai para a IA: o payload é um resumo compacto por conversa (a última
+  mensagem truncada + os sinais já registrados), então o relatório roda uma vez por dia sobre dados
+  que a extensão já tinha em mãos.
+- **Trava de 1 relatório por dia** em produção, por vendedor. Depois de gerado com sucesso, o botão
+  vira "Abrir relatório"; a falha da IA não consome a cota. Em `pnpm dev` a trava fica livre e,
+  com `config.showCosts`, aparece o botão "Gerar novamente".
+- No dev, a página mostra o bloco "Custo desta geração · dev" (estimativa antes da chamada e valor
+  efetivo devolvido pelo OpenRouter); na build de produção esse bloco não existe.
+- Variáveis novas: `PLASMO_PUBLIC_REPORT_LIMIT_PER_DAY` (quantos por dia, padrão `1`) e
+  `PLASMO_PUBLIC_REPORT_UNLIMITED` (ignora a trava; só para homologação, porque em dev ela já é
+  livre). A tarefa de relatório tem as suas próprias `PLASMO_PUBLIC_REPORT_*` (modelo, temperatura
+  etc.), como a revisão e o coaching.
+
+A arquitetura do tracking e do relatório está em `docs/architecture/`.
+
 ## Onde ajustar
 
 | O quê | Arquivo |
@@ -161,6 +213,12 @@ que não são texto do vendedor, com trecho inexistente ou sugestão igual ao or
 | Formato da resposta (JSON Schema + validação) | `src/lib/ai/schemas.ts` |
 | Seletores do Botconversa | `src/adapters/botconversa.ts` (e a fixture em `tests/fixtures/`) |
 | Nova plataforma de chat | novo adapter em `src/adapters/`, registrado em `adapters/index.ts` e no `matches` de `src/contents/companion.tsx` |
+| Nova rota de mensagem do background | arquivo em `src/background/messages/` **e** o nome da rota em `src/types/plasmo-messaging.d.ts` (o `.plasmo/messaging.d.ts` que o Plasmo gera é ignorado pelo git, e sem essa declaração o `pnpm typecheck` num clone limpo falha). Não há registro manual no `src/background/index.ts`: o Plasmo descobre as rotas pelo nome do arquivo |
+| Tracking local do dia (estado, semáforo, resumo, payload da IA) | `src/lib/tracking/` (`store.ts`, `level.ts`, `summary.ts`, `report.ts`) |
+| Relatório diário (trava, storage, custo, montagem do texto) | `src/lib/report/` (`gate.ts`, `storage.ts`, `format.ts`) |
+| Página do relatório e exportação em PDF/HTML/JSON | `src/tabs/report.tsx` |
+| Widget flutuante e resumo do painel | `src/components/DayWidget.tsx` e `src/components/DayOverview.tsx` |
+| Arquitetura do tracking e do relatório | `docs/architecture/` |
 
 ### Se o Botconversa mudar a interface
 
