@@ -29,13 +29,13 @@ const EMPTY: ComposerState = {
   conversationKey: null
 }
 
-const toBox = (el: Element | null | undefined): Box | null => {
+export const toBox = (el: Element | null | undefined): Box | null => {
   const r = el?.getBoundingClientRect()
   if (!r || r.width === 0 || r.height === 0) return null
   return { top: r.top, left: r.left, right: r.right, bottom: r.bottom, width: r.width, height: r.height }
 }
 
-const sameBox = (a: Box | null, b: Box | null) =>
+export const sameBox = (a: Box | null, b: Box | null) =>
   a === b ||
   (!!a && !!b && a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height)
 

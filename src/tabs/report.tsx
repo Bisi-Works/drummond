@@ -25,7 +25,7 @@ registerBrandFont()
 // É o artefato que o vendedor leva embora: o mesmo conteúdo do HTML baixado, mas navegável, com o
 // tema claro/escuro da extensão e um layout de impressão A4. A data vem de `?date=YYYY-MM-DD`;
 // sem ela, a página abre o último relatório gerado (`loadLatestReportRef`) e, se não houver nenhum,
-// explica no próprio estado vazio como gerar (botão "Encerrar o dia" no widget do Botconversa).
+// explica no próprio estado vazio que a geração está desligada por enquanto.
 //
 // O trabalho pesado de montar o texto fica em `~lib/report/format`: aqui só se lê o `StoredReport`
 // do storage e se escolhe o que renderizar. A barra de exportação (imprimir/PDF, baixar `.html` e
@@ -217,7 +217,10 @@ const MetricsGrid = ({ stored }: { stored: StoredReport }) => (
   </dl>
 )
 
-/** Estado sem relatório: diz qual data faltou e como gerar pelo widget do Botconversa. */
+/**
+ * Estado sem relatório: diz qual data faltou. A geração pelo Botconversa está desligada por enquanto
+ * (o "Encerrar o dia" saiu da barra), então a página só reabre relatórios já salvos.
+ */
 const EmptyState = ({ date }: { date: string | null }) => (
   <div className="space-y-4 px-7 py-8">
     <p className="text-sm text-fg">
@@ -226,20 +229,11 @@ const EmptyState = ({ date }: { date: string | null }) => (
         : "Ainda não há nenhum relatório gerado neste navegador."}
     </p>
     <div className="rounded-lg border border-dashed border-line bg-muted/40 px-4 py-4 text-sm text-fg-muted">
-      <p className="font-medium text-fg">Como gerar o relatório do dia</p>
-      <ol className="mt-2 list-decimal space-y-1.5 pl-5">
-        <li>
-          Abra o Botconversa e deixe o widget do Drummond acompanhar as conversas do dia (ele grava
-          tudo em <code>chrome.storage.local</code>, sem chamar a IA).
-        </li>
-        <li>
-          No widget, use o botão <strong>Encerrar o dia</strong> para gerar o relatório com a IA.
-        </li>
-        <li>
-          O relatório é salvo e abre nesta página. Para reabrir um dia específico, use{" "}
-          <code>?date=AAAA-MM-DD</code> no endereço.
-        </li>
-      </ol>
+      <p className="font-medium text-fg">A geração do relatório do dia está desligada por enquanto</p>
+      <p className="mt-2">
+        Relatórios gerados antes continuam salvos neste navegador. Para reabrir um dia específico, use{" "}
+        <code>?date=AAAA-MM-DD</code> no endereço.
+      </p>
     </div>
   </div>
 )

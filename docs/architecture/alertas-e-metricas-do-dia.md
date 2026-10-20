@@ -14,11 +14,11 @@ related:
 
 # Alertas e métricas do dia
 
-Referência das agregações que transformam o log bruto do dia em números e na fila de atenção que o
-widget e o painel mostram. Tudo aqui é **puro**: as funções recebem o `DayLog` e o `now` já
+Referência das agregações que transformam o log bruto do dia em números e na fila de atenção que a
+barra do dia e o painel mostram. Tudo aqui é **puro**: as funções recebem o `DayLog` e o `now` já
 carregados, sem tocar em `chrome`, IA ou relógio global — por isso são testáveis sem navegador.
 
-- Fluxo completo (adapter → storage → widget/painel): [[Tracking-e-Relatorio-Diario]].
+- Fluxo completo (adapter → storage → barra/painel): [[Tracking-e-Relatorio-Diario]].
 - Como esses números viram o relatório: [[Relatorio-Diario]].
 
 Arquivos: `src/lib/tracking/summary.ts`, `src/lib/tracking/level.ts`,
@@ -61,8 +61,8 @@ Os limites ficam em `WAIT_LIMITS_MS` (`src/lib/tracking/constants.ts`):
 | vermelho | acima de 18 min, sem teto | \( > 18 \times 60\,000\) ms |
 
 `WAIT_LEVEL_SEVERITY` dá a ordem canônica (`verde: 0` → `vermelho: 3`) usada para ordenar a fila.
-**Alerta** é qualquer conversa aguardando em **laranja ou vermelho**; é o número do badge no
-cabeçalho do widget (`summary.alerts`).
+**Alerta** é qualquer conversa aguardando em **laranja ou vermelho**; é o número do badge na
+barra do dia (`summary.alerts`).
 
 O rótulo de cada conversa é o **nome do contato** lido do cabeçalho do chat
 (`adapter.getContactName()`; no Botconversa, `_chatArea_ > _root_ … _details_ > _content_ >
@@ -70,8 +70,8 @@ O rótulo de cada conversa é o **nome do contato** lido do cabeçalho do chat
 `confirmContactName` (`src/lib/tracking/level.ts`) só aceita o nome depois de vê-lo igual em dois
 ticks seguidos para a mesma conversa — assim a conversa nova não herda o nome da anterior. Até
 confirmar, vale o rótulo já gravado, ou a `key` (o `chat_id`) numa conversa nunca vista. O trecho da
-última mensagem não aparece mais no widget nem no painel: cada linha é só o nome e o tempo de espera,
-e só as conversas aguardando são listadas (os respondidos ficam nos totais do rodapé).
+última mensagem não aparece na barra nem no painel: cada chip/linha é só o nome e o tempo de espera,
+e só as conversas aguardando são listadas (os respondidos ficam nos totais).
 
 ## Totais do dia (`summarizeDay`)
 
@@ -113,7 +113,7 @@ Só entram conversas em `aguardando`, ordenadas por:
 2. Tempo de espera mais longo primeiro, dentro do mesmo nível.
 3. `key` como desempate, para a ordem ser determinística.
 
-O widget mostra a fila no topo, com a linha destacada (`WAIT_ROW`/`WAIT_CHIP` em `src/lib/labels.ts`);
+A barra mostra a fila nessa ordem, como chips na cor do semáforo (`WAIT_CHIP` em `src/lib/labels.ts`);
 o restante vem por `lastSeenAt`. O painel lateral (`DayOverview`) usa exatamente a mesma fila e os
 mesmos totais.
 
@@ -121,7 +121,7 @@ mesmos totais.
 
 | Superfície | Arquivo | O que mostra |
 | --- | --- | --- |
-| Widget flutuante | `src/components/DayWidget.tsx` | Badge de alerta, linhas com chip colorido, fila no topo, totais no rodapé. |
+| Barra do dia | `src/components/InboxBar.tsx` | Badge de alerta, chips coloridos na ordem da fila (os que não cabem no "+N"), totais ao lado da marca. |
 | Painel lateral | `src/components/DayOverview.tsx` | Totais e fila de atenção, lidos do storage sem adapter. |
 | Relatório do dia | `src/lib/tracking/report.ts` | Totais e estado por conversa entram no payload da IA e nas métricas da página. |
 

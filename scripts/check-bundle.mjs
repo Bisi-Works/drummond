@@ -375,11 +375,12 @@ try {
   check(errors.length === 0, `content script executa sem erro${errors.length ? `: ${errors[0]}` : ""}`)
   check(!!window.document.querySelector("plasmo-csui"), "content script monta a UI na página")
   const contentBundle = script.js.map(read).join("")
+  check(contentBundle.includes("transcribe-audio"), "content script referencia a rota transcribe-audio (sem a chave da API)")
+  // O "Encerrar o dia" saiu da barra: o vendedor não tem mais como gerar o relatório. Os nomes das
+  // rotas continuam no bundle (constantes de `~lib/messages`), então o sinal é o código do botão.
   check(
-    contentBundle.includes("generate-report") &&
-      contentBundle.includes("open-report") &&
-      contentBundle.includes("transcribe-audio"),
-    "content script referencia as rotas generate-report/open-report/transcribe-audio (sem a chave da API)"
+    !contentBundle.includes("Encerrar o dia") && !contentBundle.includes("Gerando relatório"),
+    "content script sem o botão de gerar o relatório (Encerrar o dia)"
   )
   const response = await deliver(listeners, { name: "get-conversation" })
   check(response?.conversation?.length === 10 && response.conversationKey === "123", `get-conversation lê a conversa (${response?.conversation?.length ?? 0} mensagens)`)
@@ -457,22 +458,13 @@ try {
   check(false, `side panel executa sem erro: ${error.stack ?? error}`)
 }
 
-// 5. Trava diária, widget e página do relatório --------------------------------------------------
-// Executa a build de verdade para provar as garantias da fase: em produção o widget bloqueia a
-// segunda geração do dia (cota consumida), o relatório não leva custo e a busca de preços não
-// roda; em dev a cota fica livre (para testar) e o custo aparece. A data é a local de hoje, a
-// mesma que `dayKey()` calcula no navegador.
+// 5. Barra do dia e página do relatório ----------------------------------------------------------
+// Executa a build de verdade: a barra não oferece mais gerar o relatório (só o resumo e, no dev, a
+// limpeza dos dados); a página do relatório continua na extensão, sem custo em produção.
 
-const today = (() => {
-  const now = new Date()
-  const pad = (n) => String(n).padStart(2, "0")
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-})()
-
-const REPORT_GENERATED_PREFIX = "drummond.report.generated."
 const REPORT_DATE = "2026-10-07"
 
-/** `chrome` com um `storage.local` em memória (semeado): o mínimo para a trava e a página. */
+/** `chrome` com um `storage.local` em memória (semeado): o mínimo para a barra e a página. */
 const chromeWithStorage = (seed = {}) => {
   const store = { ...seed }
   const area = {
@@ -495,15 +487,12 @@ const chromeWithStorage = (seed = {}) => {
   return chrome
 }
 
-// 5a. Widget do dia no content script ------------------------------------------------------------
+// 5a. Barra do dia no content script ------------------------------------------------------------
 try {
   const contentScript = manifest.content_scripts?.[0]
   const window = new Window({ url: "https://app.botconversa.com.br/1/inbox?chat_id=123" })
   window.document.write(readFileSync("tests/fixtures/botconversa-inbox.html", "utf8"))
-  // Cota do dia já consumida: produção tem que travar o botão; dev ignora a trava de propósito.
-  window.chrome = chromeWithStorage({
-    [`${REPORT_GENERATED_PREFIX}${today}`]: { generatedAt: Date.now(), count: 1 }
-  })
+  window.chrome = chromeWithStorage()
 
   const errors = []
   window.addEventListener("error", (event) => errors.push(event.error ?? event.message))
@@ -512,25 +501,28 @@ try {
 
   // A UI do content script vive num shadow DOM (`plasmo-csui`).
   const root = window.document.querySelector("plasmo-csui")?.shadowRoot ?? window.document
-  const labels = Array.from(root.querySelectorAll("button")).map((button) => button.textContent.trim())
-  const expected = isDevBuild ? "Encerrar o dia" : "Relatório de hoje já gerado"
-  const warning = (root.textContent ?? "").includes("A cota de um relatório por dia já foi usada")
-  check(labels.includes(expected), `widget ${isDevBuild ? "dev" : "produção"}: botão do dia em "${expected}" (${labels.join(" · ") || "nenhum botão"})`)
-  check(warning === !isDevBuild, `widget ${isDevBuild ? "dev" : "produção"}: aviso da cota ${isDevBuild ? "ausente" : "presente"}`)
+  const buttonLabels = () => Array.from(root.querySelectorAll("button")).map((button) => button.textContent.trim())
+  const build = isDevBuild ? "dev" : "produção"
+  // As ferramentas de dev ficam no menu "⋯" da barra; abre para ver tudo o que ela oferece.
+  root.querySelector('button[aria-label="Mais opções do dia"]')?.click()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  const labels = buttonLabels()
+  const reportLabels = labels.filter((label) => /Encerrar o dia|relatório/i.test(label))
+  check(reportLabels.length === 0, `barra do dia ${build}: sem botão de relatório (${labels.join(" · ") || "nenhum botão"})`)
   // Limpar os dados salvos apaga relatórios e a cota diária: só pode existir na build de dev.
   const clearLabel = "Limpar dados salvos (dev)"
   check(
     labels.includes(clearLabel) === isDevBuild,
-    `widget ${isDevBuild ? "dev" : "produção"}: botão "${clearLabel}" ${isDevBuild ? "presente" : "ausente"}`
+    `barra do dia ${build}: botão "${clearLabel}" ${isDevBuild ? "presente" : "ausente"}`
   )
   if (!isDevBuild) {
     const emitted = contentScript.js.map((file) => read(file)).join("\n")
     check(!emitted.includes("Apagar tudo (dev)"), "produção: o código de limpeza dos dados não vai para o bundle")
   }
-  check(errors.length === 0, `widget executa sem erro${errors.length ? `: ${errors[0]}` : ""}`)
+  check(errors.length === 0, `barra do dia executa sem erro${errors.length ? `: ${errors[0]}` : ""}`)
   await window.happyDOM.close()
 } catch (error) {
-  check(false, `widget executa sem erro: ${error.stack ?? error}`)
+  check(false, `barra do dia executa sem erro: ${error.stack ?? error}`)
 }
 
 // 5a'. Pitaco, Revisar e Coaching com áudio no content script -----------------------------------

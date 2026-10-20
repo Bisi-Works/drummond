@@ -88,6 +88,16 @@ export interface ChatAudio {
 }
 
 /**
+ * Cabeçalho fixo da plataforma onde a barra do dia se encaixa: o espaço livre fica entre `start`
+ * (título da página) e `end` (ícones da conta). Sem um deles, a barra vai até a borda do `bar`.
+ */
+export interface HeaderSlot {
+  bar: HTMLElement
+  start: HTMLElement | null
+  end: HTMLElement | null
+}
+
+/**
  * Tudo o que a extensão precisa saber sobre uma plataforma de chat. Cada plataforma (Botconversa,
  * futuramente outras) implementa esta interface e o resto do código não conhece seletores de DOM.
  */
@@ -137,4 +147,16 @@ export interface ChatAdapter {
    * conversas que o vendedor não abriu.
    */
   listRecentMessages?(key: string, limit: number): Promise<InboxMessage[] | null>
+  /** Cabeçalho da página onde a barra do dia fica; `null` quando não há (a barra flutua). */
+  getHeaderSlot?(): HeaderSlot | null
+  /**
+   * Abre a conversa de `key` (o mesmo valor de `getConversationKey()`) sem recarregar a página.
+   * Retorna `false` quando a chave não leva a uma conversa (ex.: caiu no `pathname`).
+   */
+  openConversation?(key: string): boolean
+  /**
+   * Reserva `px` na borda direita da página, que reflui o layout para o espaço que sobra (o drawer
+   * do Pitaco abre ali sem cobrir nada). `0` devolve o espaço. Sem isso, o drawer sobrepõe a página.
+   */
+  setRightInset?(px: number): void
 }

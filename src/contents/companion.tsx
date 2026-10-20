@@ -6,16 +6,18 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { getAdapter } from "~adapters"
 import type { ReviewDraftRequest, ReviewDraftResponse } from "~background/messages/review-draft"
 import { GlassesMark } from "~components/Brand"
-import { DayWidget } from "~components/DayWidget"
+import { InboxBar } from "~components/InboxBar"
 import { PitacoDrawer, PitacoMark } from "~components/PitacoDrawer"
 import { Spinner } from "~components/Spinner"
 import { SuggestionCard, type ReviewState } from "~components/SuggestionCard"
 import { useComposerState, type Box } from "~hooks/useComposerState"
+import { useHeaderSlot } from "~hooks/useHeaderSlot"
 import { usePitaco } from "~hooks/usePitaco"
 import { useTheme } from "~hooks/useTheme"
 import { PROMPT_VERSION } from "~lib/ai/prompts"
 import { registerBrandFont } from "~lib/brand-font"
 import { config as appConfig } from "~lib/config"
+import { shouldPushPage } from "~lib/layout"
 import { GET_CONVERSATION, type GetConversationResponse } from "~lib/messages"
 import { reviewSignal } from "~lib/tracking/signals"
 import { recordReview } from "~lib/tracking/store"
@@ -67,14 +69,17 @@ const CARD_GAP = 8
 const BUTTON_HEIGHT = 28
 const BUTTON_GAP = 8
 /**
- * Drawer do Pitaco: preso à direita, na altura inteira. Ocupa o espaço à direita do campo de texto
- * (o painel "Perfil" do Botconversa) para não cobrir o botão de enviar, entre o mínimo e o máximo
- * abaixo, e nunca passa da tela menos a margem.
+ * Drawer do Pitaco: preso à direita, na altura inteira. Quando o chat ainda cabe ao lado dele
+ * (`shouldPushPage`), empurra a página com a largura cheia e não cobre nada. Senão, sobrepõe: ocupa o
+ * espaço à direita do campo de texto (o painel "Perfil" do Botconversa) para não cobrir o botão de
+ * enviar, entre o mínimo e o máximo abaixo. Nunca passa da tela menos a margem.
  */
 const DRAWER_WIDTH = 400
 const DRAWER_MIN_WIDTH = 320
 const DRAWER_GAP = 8
 const DRAWER_MARGIN = 32
+
+const pushedDrawerWidth = () => Math.min(DRAWER_WIDTH, window.innerWidth - DRAWER_MARGIN)
 
 const drawerWidth = (frame: Box | null) => {
   const room = frame ? window.innerWidth - frame.right - DRAWER_GAP : DRAWER_WIDTH
@@ -102,6 +107,7 @@ const failure = (error: string): ReviewDraftResponse => ({
 
 const Companion = () => {
   const { composer, frame, buttonAnchor, draft, conversationKey } = useComposerState(adapter)
+  const headerSlot = useHeaderSlot(adapter)
   // Só lê: o tema é trocado no painel lateral e chega aqui pelo chrome.storage.
   const { theme } = useTheme()
   const [review, setReview] = useState<ReviewState>({ kind: "idle" })
@@ -135,6 +141,23 @@ const Companion = () => {
     document.addEventListener("keydown", onKeyDown, true)
     return () => document.removeEventListener("keydown", onKeyDown, true)
   }, [review.kind, pitaco.isOpen, dismiss, closePitaco])
+
+  // Empurrar ou sobrepor: decide pela largura do chat (o campo de texto) e reavalia quando ela muda,
+  // inclusive pelo próprio empurrão. Sem campo na tela (a página remonta o chat ao trocar de
+  // conversa) mantém a decisão, para não piscar. Fechar o drawer devolve o espaço à página.
+  const chatWidth = composer && frame ? frame.width : null
+  const [pushed, setPushed] = useState(false)
+  useEffect(() => {
+    if (!pitaco.isOpen) return setPushed(false)
+    if (chatWidth === null) return
+    setPushed((was) => shouldPushPage(chatWidth, was, pushedDrawerWidth()))
+  }, [pitaco.isOpen, chatWidth])
+
+  useEffect(() => {
+    if (!pushed || !adapter?.setRightInset) return
+    adapter.setRightInset(pushedDrawerWidth())
+    return () => adapter.setRightInset?.(0)
+  }, [pushed])
 
   const togglePitaco = () => {
     if (pitaco.isOpen) return pitaco.close()
@@ -191,7 +214,7 @@ const Companion = () => {
     setTimeout(() => setCopied(false), 1500)
   }
 
-  // Só o adapter é indispensável: o widget do dia existe mesmo sem conversa aberta (o campo de
+  // Só o adapter é indispensável: a barra do dia existe mesmo sem conversa aberta (o campo de
   // texto pode não estar montado). O botão "Revisar" e o card continuam presos ao campo.
   if (!adapter) return null
 
@@ -203,7 +226,7 @@ const Companion = () => {
 
   return (
     <div className={theme === "dark" ? "dark font-sans" : "font-sans"}>
-      <DayWidget adapter={adapter} />
+      <InboxBar adapter={adapter} slot={headerSlot} activeKey={conversationKey} />
 
       {composerFrame && (
         <>
@@ -262,8 +285,7 @@ const Companion = () => {
         </>
       )}
 
-      {/* Acima do widget do dia (z-50): enquanto o drawer está aberto, ele cobre o widget sem mexer
-          na posição salva pelo vendedor. */}
+      {/* Acima da barra do dia (z-50): quando sobrepõe a página, o drawer cobre o fim da barra. */}
       {pitaco.isOpen && (
         <div
           className="z-[60]"
@@ -272,7 +294,7 @@ const Companion = () => {
             top: 0,
             right: 0,
             bottom: 0,
-            width: drawerWidth(composerFrame || null)
+            width: pushed ? pushedDrawerWidth() : drawerWidth(composerFrame || null)
           }}>
           <PitacoDrawer
             state={pitaco.state}
