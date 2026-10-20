@@ -16,5 +16,6 @@ declare module "@plasmohq/messaging" {
     "open-report": {}
     "classify-closing": {}
     "transcribe-audio": {}
+    "generate-pitaco": {}
   }
 }

@@ -13,7 +13,16 @@ import {
   MAX_CHANGES,
   MAX_IMPROVEMENTS,
   MAX_REPORT_ITEMS,
+  MAX_PITACO_AVOID,
+  MAX_PITACO_PATH,
+  MAX_PITACO_POINTS,
+  MAX_PITACO_QUESTIONS,
+  MAX_PITACO_WARNINGS,
   MAX_STRENGTHS,
+  pitacoPointKinds,
+  pitacoStages,
+  spinStages,
+  spinStatuses,
   type ImpactLevel
 } from "./constants"
 
@@ -117,10 +126,75 @@ export const dailyReportSchema = z.object({
     )
 })
 
+// Pitaco: orientação de condução pelo SPIN, nunca uma mensagem pronta (não existe campo de texto
+// para enviar). `evidence` traz os números [n] das mensagens que sustentam o item; o service
+// descarta os números que não existem na conversa. As etapas vêm primeiro: o modelo gera na ordem
+// do schema e decide a etapa atual e o caminho depois de olhar a evidência de cada uma.
+const spinStageSchema = z.object({
+  status: z
+    .enum(spinStatuses)
+    .describe('"coberta" (o cliente já respondeu), "parcial" (apareceu de forma vaga) ou "pendente".'),
+  evidence: z
+    .string()
+    .describe("O que a conversa mostra sobre a etapa, citando #n. Se não foi abordada, diga isso.")
+})
+
+const evidenceSchema = z
+  .array(z.number())
+  .describe("Números [n] das mensagens que sustentam o item. Vazio só se a conversa não tem nada sobre ele.")
+
+export const pitacoSchema = z.object({
+  stages: z
+    .object({
+      situacao: spinStageSchema,
+      problema: spinStageSchema,
+      implicacao: spinStageSchema,
+      necessidade: spinStageSchema
+    })
+    .describe("Status e evidência de cada etapa do SPIN."),
+  stageNow: z
+    .enum(pitacoStages)
+    .describe('Etapa em que a conversa está agora; "abertura" se a descoberta ainda não começou.'),
+  diagnosis: z.string().describe("Leitura da conversa em 1–2 frases: onde está e o que falta."),
+  path: z
+    .array(z.string())
+    .describe(`Até ${MAX_PITACO_PATH} passos sugeridos, em ordem, como ações curtas do vendedor.`),
+  points: z
+    .array(
+      z.object({
+        stage: z.enum(spinStages),
+        kind: z.enum(pitacoPointKinds),
+        title: z.string().describe("O ponto a abordar, em até 8 palavras."),
+        why: z.string().describe("Por que abordar agora, ancorado na conversa."),
+        hint: z
+          .string()
+          .describe("Direção de raciocínio em até 20 palavras. Nunca uma frase para enviar ao cliente."),
+        evidence: evidenceSchema
+      })
+    )
+    .describe(`Até ${MAX_PITACO_POINTS} pontos a abordar, do mais para o menos importante.`),
+  questions: z
+    .array(
+      z.object({
+        stage: z.enum(spinStages),
+        text: z.string().describe("Uma pergunta aberta e curta, uma só frase."),
+        evidence: evidenceSchema
+      })
+    )
+    .describe(`Até ${MAX_PITACO_QUESTIONS} perguntas abertas que ainda não foram respondidas.`),
+  avoid: z.array(z.string()).describe(`Até ${MAX_PITACO_AVOID} coisas a não fazer agora.`),
+  warnings: z
+    .array(z.string())
+    .describe(`Até ${MAX_PITACO_WARNINGS} fatos a confirmar antes de falar. Vazio se não houver.`)
+})
+
 export type DraftReview = z.infer<typeof draftReviewSchema>
 export type CoachingReport = z.infer<typeof coachingReportSchema>
 export type BantItem = z.infer<typeof bantItemSchema>
 export type DailyReport = z.infer<typeof dailyReportSchema>
+export type Pitaco = z.infer<typeof pitacoSchema>
+export type PitacoPoint = Pitaco["points"][number]
+export type PitacoQuestion = Pitaco["questions"][number]
 
 // Em `json_object` o schema não vai na requisição: o formato fica a cargo do prompt (que descreve o
 // JSON esperado) e da validação com zod depois do parse.
@@ -146,6 +220,16 @@ export const limitCoaching = (report: CoachingReport): CoachingReport => ({
   improvements: [...report.improvements]
     .sort((a, b) => impactOrder[a.impact] - impactOrder[b.impact])
     .slice(0, MAX_IMPROVEMENTS)
+})
+
+/** Trunca as listas do Pitaco nos limites do drawer, preservando a ordem. */
+export const limitPitaco = (pitaco: Pitaco): Pitaco => ({
+  ...pitaco,
+  path: pitaco.path.slice(0, MAX_PITACO_PATH),
+  points: pitaco.points.slice(0, MAX_PITACO_POINTS),
+  questions: pitaco.questions.slice(0, MAX_PITACO_QUESTIONS),
+  avoid: pitaco.avoid.slice(0, MAX_PITACO_AVOID),
+  warnings: pitaco.warnings.slice(0, MAX_PITACO_WARNINGS)
 })
 
 /** Trunca as quatro listas do relatório diário em `MAX_REPORT_ITEMS`, preservando a ordem. */

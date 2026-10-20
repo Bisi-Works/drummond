@@ -5,9 +5,11 @@ import type { DailyReportInput } from "~lib/tracking/report"
 import { estimateCost, estimateTokens, pricingRange, type CostEstimate, type CostInfo } from "./cost"
 import { chatCompletion, fetchModelEndpoints, OpenRouterError } from "./openrouter"
 import { parseModelJson } from "./parse"
+import { MAX_PITACO_HINT_CHARS, MAX_PITACO_QUESTION_CHARS } from "./constants"
 import {
   buildCoachPrompt,
   buildDailyReportPrompt,
+  buildPitacoPrompt,
   buildReviewPrompt,
   PROMPT_VERSION,
   type PromptMessages
@@ -18,12 +20,15 @@ import {
   draftReviewSchema,
   limitCoaching,
   limitDailyReport,
+  limitPitaco,
   limitReview,
+  pitacoSchema,
   toResponseFormat,
   type BantItem,
   type CoachingReport,
   type DailyReport,
-  type DraftReview
+  type DraftReview,
+  type Pitaco
 } from "./schemas"
 
 export interface AiMeta {
@@ -120,6 +125,7 @@ const complete = async (
 const REVIEW_OVERHEAD_TOKENS = 150
 const COACHING_OUTPUT_TOKENS = 1000
 const REPORT_OUTPUT_TOKENS = 1200
+const PITACO_OUTPUT_TOKENS = 900
 
 const reviewFormat = toResponseFormat("draft_review", draftReviewSchema, config.review.responseFormat)
 const coachingFormat = toResponseFormat(
@@ -128,6 +134,7 @@ const coachingFormat = toResponseFormat(
   config.coach.responseFormat
 )
 const reportFormat = toResponseFormat("daily_report", dailyReportSchema, config.report.responseFormat)
+const pitacoFormat = toResponseFormat("pitaco", pitacoSchema, config.pitaco.responseFormat)
 
 // Garante coerência entre status e texto: "ok" nunca altera o rascunho, e uma sugestão idêntica ao
 // original é tratada como "ok" (alguns modelos marcam "ajustes" sem mudar nada).
@@ -168,6 +175,33 @@ export const dropInvalidImprovements = (
   })
 })
 
+/**
+ * Mantém o Pitaco ancorado na conversa e longe de mensagem pronta: tira de `evidence` os números
+ * que não existem; descarta o ponto ou a pergunta que só citava mensagens inexistentes (o modelo
+ * inventou a base); descarta perguntas longas ou com quebra de linha (viraram texto para enviar) e
+ * esvazia a dica nas mesmas condições. Depois limita as listas.
+ */
+export const sanitizePitaco = (pitaco: Pitaco, conversation: ChatMessage[]): Pitaco => {
+  const ids = new Set(conversation.map((m) => m.id))
+  const anchored = <T extends { evidence: number[] }>(item: T): T | null => {
+    const evidence = [...new Set(item.evidence.filter((id) => ids.has(id)))]
+    return item.evidence.length > 0 && evidence.length === 0 ? null : { ...item, evidence }
+  }
+  const short = (text: string, max: number) => !/\n/.test(text.trim()) && text.trim().length <= max
+
+  return limitPitaco({
+    ...pitaco,
+    points: pitaco.points
+      .map(anchored)
+      .filter((point) => point !== null)
+      .map((point) => (short(point.hint, MAX_PITACO_HINT_CHARS) ? point : { ...point, hint: "" })),
+    questions: pitaco.questions
+      .map(anchored)
+      .filter((question) => question !== null)
+      .filter((question) => question.text.trim() && short(question.text, MAX_PITACO_QUESTION_CHARS))
+  })
+}
+
 export const reviewDraft =(conversation: ChatMessage[], draft: string) =>
   run(config.review, async (ctx) => {
     if (!draft.trim()) throw new Error("Digite uma mensagem antes de pedir a revisão.")
@@ -206,6 +240,27 @@ export const coachConversation = (conversation: ChatMessage[], stream: StreamOpt
     return limitCoaching(
       dropInvalidImprovements(parseModelJson(raw, coachingReportSchema), conversation)
     )
+  })
+
+/**
+ * Pitaco: orientação SPIN sobre a conversa inteira (com as transcrições já anexadas pelo content
+ * script). Basta haver mensagem do cliente ou do vendedor — só cliente vira descoberta, só vendedor
+ * vira abertura. Sem nenhuma das duas não há o que orientar, e a IA não é chamada.
+ */
+export const generatePitaco = (conversation: ChatMessage[]) =>
+  run(config.pitaco, async (ctx): Promise<Pitaco> => {
+    if (!config.pitaco.enabled) throw new Error("O Pitaco está desativado nesta build.")
+    if (!conversation.some((m) => m.author === "cliente" || m.author === "vendedor")) {
+      throw new Error("Ainda não há mensagens nesta conversa para dar um Pitaco.")
+    }
+    const raw = await complete(
+      ctx,
+      config.pitaco,
+      buildPitacoPrompt(conversation),
+      pitacoFormat,
+      PITACO_OUTPUT_TOKENS
+    )
+    return sanitizePitaco(parseModelJson(raw, pitacoSchema), conversation)
   })
 
 /**

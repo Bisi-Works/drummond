@@ -93,6 +93,22 @@ const fakeModel = {
     },
     nextStep: "Enviar proposta."
   },
+  // Pitaco da rota "generate-pitaco": cita a mensagem #1 (existe) e a #9 (não existe, sai no service).
+  pitaco: {
+    stages: {
+      situacao: { status: "parcial", evidence: "Cliente só cumprimentou (#1)." },
+      problema: { status: "pendente", evidence: "Não abordado." },
+      implicacao: { status: "pendente", evidence: "Não abordada." },
+      necessidade: { status: "pendente", evidence: "Não abordada." }
+    },
+    stageNow: "situacao",
+    diagnosis: "Conversa no início, sem descoberta.",
+    path: ["Entender o que o cliente procura"],
+    points: [{ stage: "situacao", kind: "descobrir", title: "O que motivou o contato", why: "Só houve saudação (#1).", hint: "Entender o objetivo.", evidence: [1, 9] }],
+    questions: [{ stage: "situacao", text: "O que fez você procurar a gente agora?", evidence: [1] }],
+    avoid: ["Falar de preço antes de entender o objetivo"],
+    warnings: []
+  },
   // Relatório diário da rota "generate-report" (e do botão "Encerrar o dia" no widget).
   daily: {
     resumo: "Dia produtivo, com uma pendência.",
@@ -153,7 +169,10 @@ const fetchStub = async (url, init) => {
   const system = body.messages[0].content
   const isReview = system.includes("Tarefa: revisar o rascunho")
   const isDaily = system.includes("Tarefa: relatório diário de coaching")
-  const content = JSON.stringify(isReview ? fakeModel.review : isDaily ? fakeModel.daily : fakeModel.coach)
+  const isPitaco = system.includes("Tarefa: Pitaco de condução")
+  const content = JSON.stringify(
+    isReview ? fakeModel.review : isDaily ? fakeModel.daily : isPitaco ? fakeModel.pitaco : fakeModel.coach
+  )
   const usage = { prompt_tokens: 1000, completion_tokens: 200, cost: 0.00054 }
   if (!body.stream) {
     return new Response(JSON.stringify({ provider: "Fake", usage, choices: [{ message: { content } }] }))
@@ -244,6 +263,25 @@ try {
     "classify-closing: política de dados 'deny' e chave só enviada ao OpenRouter")
   check(decision?.body.state.conversa.length === 2 && decision.body.questions.reply.type === "choice",
     "classify-closing: estado com a mensagem anterior do vendedor e pergunta Choice")
+
+  // Pitaco: rota própria no background, sem streaming, com a conversa fictícia acima. A evidência
+  // inexistente (#9) tem que sair na validação do service.
+  const pitaco = await deliver(listeners, { name: "generate-pitaco", body: { conversation } })
+  check(
+    pitaco?.ok === true && pitaco.data.stageNow === "situacao" && pitaco.data.points[0]?.evidence.join() === "1",
+    `generate-pitaco responde e descarta evidência inexistente (${pitaco?.ok ? pitaco.data.points[0]?.evidence.join() : pitaco?.error})`
+  )
+  const pitacoRequest = requests.at(-1)
+  check(
+    validFormat(pitacoRequest, "stages,stageNow,diagnosis,path,points,questions,avoid,warnings") &&
+      pitacoRequest?.provider?.require_parameters === true && !pitacoRequest?.stream,
+    `pitaco: formato completo, provedor compatível e sem streaming (${describeRequest(pitacoRequest)})`
+  )
+  if (isDevBuild) {
+    check(pitaco?.meta?.cost?.effective?.usd === 0.00054, `dev: custo efetivo do Pitaco (${JSON.stringify(pitaco?.meta?.cost?.effective ?? null)})`)
+  } else {
+    check(pitaco?.meta?.cost === undefined, "produção: Pitaco sem custo na resposta")
+  }
 
   // Transcrição de áudio (Whisper): rota própria no background, no endpoint de transcrição (o
   // `chat/completions` recusa modelos audio->transcription).

@@ -1,6 +1,6 @@
 import type { ChatMessage } from "~adapters/types"
 import type { CostInfo } from "~lib/ai/cost"
-import type { CoachingReport, DailyReport } from "~lib/ai/schemas"
+import type { CoachingReport, DailyReport, Pitaco } from "~lib/ai/schemas"
 import type { AiResult } from "~lib/ai/service"
 import type { DailyReportInput } from "~lib/tracking/report"
 
@@ -41,6 +41,16 @@ export interface GenerateReportRequest {
 }
 
 export type GenerateReportResponse = AiResult<DailyReport>
+
+// O Pitaco também é uma mensagem simples: o drawer manda a conversa já enriquecida com as
+// transcrições (`prepareConversation`) e recebe a orientação validada, sem streaming.
+export const GENERATE_PITACO = "generate-pitaco"
+
+export interface GeneratePitacoRequest {
+  conversation: ChatMessage[]
+}
+
+export type GeneratePitacoResponse = AiResult<Pitaco>
 
 // Abrir a página do relatório também passa pelo background: `chrome.tabs` não existe no content
 // script (o widget roda no shadow DOM da página do Botconversa), então o widget só manda a data e

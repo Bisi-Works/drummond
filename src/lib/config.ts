@@ -95,6 +95,20 @@ const report: ModelConfig = {
 }
 
 /**
+ * Pitaco (orientação SPIN no drawer): roda quando o vendedor pede, sobre a conversa inteira, e gera
+ * ~900 tokens. `PLASMO_PUBLIC_PITACO=off` desliga o recurso (rollback sem nova versão do código).
+ */
+const pitaco: ModelConfig & { enabled: boolean } = {
+  enabled: process.env.PLASMO_PUBLIC_PITACO !== "off",
+  model: process.env.PLASMO_PUBLIC_PITACO_MODEL || "deepseek/deepseek-v4-flash-0731",
+  temperature: toNumber(process.env.PLASMO_PUBLIC_PITACO_TEMPERATURE ?? "0.3"),
+  reasoning: toReasoning(process.env.PLASMO_PUBLIC_PITACO_REASONING ?? "off"),
+  responseFormat: toResponseFormatMode(process.env.PLASMO_PUBLIC_PITACO_RESPONSE_FORMAT ?? "json_schema"),
+  providerOrder: toProviderOrder(process.env.PLASMO_PUBLIC_PITACO_PROVIDER_ORDER ?? "cohere,parasail"),
+  timeoutMs: 60_000
+}
+
+/**
  * Speech-to-text dos áudios da conversa. O Whisper no OpenRouter é um modelo
  * `audio->transcription`: não aceita `response_format`, temperatura nem raciocínio, então a
  * chamada de transcrição é separada das tarefas de JSON.
@@ -134,6 +148,7 @@ export const config = {
   review,
   coach,
   report,
+  pitaco,
   closing,
   stt,
   contextMessages: toNumber(process.env.PLASMO_PUBLIC_CONTEXT_MESSAGES) ?? 20,
