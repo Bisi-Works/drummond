@@ -3,7 +3,10 @@ import type {
   BantStatus,
   ChangeCategory,
   CoachingCategory,
-  ImpactLevel
+  ImpactLevel,
+  PitacoPointKind,
+  SpinStage,
+  SpinStatus
 } from "~lib/ai/constants"
 import type { WaitLevel } from "~lib/tracking/types"
 
@@ -75,4 +78,27 @@ export const BANT_STATUS_STYLE: Record<
     iconClassName: "text-fg-subtle",
     className: "bg-muted text-fg-muted"
   }
+}
+
+/** Etapas do SPIN no stepper do Pitaco, na ordem S → P → I → N. */
+export const SPIN_LABEL: Record<SpinStage, { letter: string; label: string }> = {
+  situacao: { letter: "S", label: "Situação" },
+  problema: { letter: "P", label: "Problema" },
+  implicacao: { letter: "I", label: "Implicação" },
+  necessidade: { letter: "N", label: "Necessidade" }
+}
+
+/** Mesmos ícones e cores do BANT: coberta ✓, parcial ◐, pendente ○. */
+export const SPIN_STATUS_STYLE: Record<SpinStatus, { label: string; icon: string; iconClassName: string }> = {
+  coberta: { label: "Coberta", icon: "✓", iconClassName: "text-emerald-600 dark:text-emerald-400" },
+  parcial: { label: "Parcial", icon: "◐", iconClassName: "text-amber-600 dark:text-amber-400" },
+  pendente: { label: "Pendente", icon: "○", iconClassName: "text-fg-subtle" }
+}
+
+export const PITACO_KIND_LABEL: Record<PitacoPointKind, string> = {
+  descobrir: "Descobrir",
+  aprofundar: "Aprofundar",
+  confirmar: "Confirmar",
+  objecao: "Objeção",
+  avancar: "Avançar"
 }

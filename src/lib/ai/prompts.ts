@@ -24,7 +24,7 @@ import {
 
 // Todo o comportamento da IA é definido neste arquivo. Ao alterar qualquer texto abaixo, incremente
 // PROMPT_VERSION — ele aparece na UI e ajuda a comparar resultados entre versões.
-export const PROMPT_VERSION = "2026-10-20.1"
+export const PROMPT_VERSION = "2026-10-20.2"
 
 export const SYSTEM_BASE = `
 Você é o Drummond by BW, assistente de revisão de mensagens da equipe comercial da ${COMPANY_NAME}.
@@ -368,7 +368,8 @@ começou (ex.: só houve saudação ou mensagens automáticas).
   uma objeção) ou "avancar" (próximo passo). title em até 8 palavras; why ancorado na conversa; hint
   em até 20 palavras.
 - questions: até ${MAX_PITACO_QUESTIONS} perguntas abertas (não de sim/não), curtas, uma frase cada,
-  ainda não respondidas na conversa.
+  ainda não respondidas na conversa. Sem vocativo: não comece nem termine com o nome do cliente
+  (escreva "O que te faz…?", não "Fulano, o que te faz…?").
 - avoid: até ${MAX_PITACO_AVOID} coisas a não fazer agora, específicas desta conversa.
 - warnings: até ${MAX_PITACO_WARNINGS} fatos a confirmar antes de falar; vazio se não houver.
 `.trim()

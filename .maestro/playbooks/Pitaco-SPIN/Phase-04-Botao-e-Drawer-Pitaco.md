@@ -4,28 +4,54 @@ O botão **Pitaco** fica ao lado de **Revisar**, na barra do campo de texto. Cli
 conversa, garante as transcrições e gera o Pitaco, abrindo o resultado no drawer. O drawer também
 tem **Atualizar Pitaco**.
 
+## Decisões de desenho (20/10/2026)
+
+- **Posição:** drawer preso à direita, na altura inteira. Ocupa o espaço à direita do campo de
+  texto (o painel "Perfil"), entre 320 e 400 px, para não cobrir o botão de enviar. Em janelas
+  estreitas, em que o Botconversa esconde o Perfil, ele fica com 320 px e cobre a ponta do campo.
+- **Clique fora não fecha:** o vendedor consulta o Pitaco enquanto escreve. Fecha pelo ✕, pelo Esc
+  ou pelo próprio botão Pitaco (que fica preenchido enquanto o drawer está aberto).
+- **Só as perguntas são copiáveis:** os pontos são direção de raciocínio, não texto para colar.
+- **Widget do dia:** o drawer (z-60) fica por cima do widget (z-50), sem mexer na posição nem no
+  "minimizado" salvos pelo vendedor.
+- **Cabeçalho:** retrato + "Pitaco · SPIN" + nome do contato. O "Drummond by BW" quebrava no drawer
+  de 320 px.
+
 ## Tasks
 
-- [ ] Transformar o botão atual num container flexível com **Revisar** e **Pitaco**, mantendo o
+- [x] Transformar o botão atual num container flexível com **Revisar** e **Pitaco**, mantendo o
   posicionamento em relação ao campo e o fallback em telas estreitas.
-- [ ] Criar `src/components/PitacoDrawer.tsx`:
+- [x] Criar `src/components/PitacoDrawer.tsx`:
   - cabeçalho “Pitaco · SPIN” e fechar;
   - stepper S → P → I → N com a etapa atual;
   - diagnóstico, caminho sugerido, pontos, perguntas, “evite agora” e avisos;
   - botão **Atualizar Pitaco**;
-  - copiar pergunta/ponto (sem aplicar mensagem inteira);
+  - copiar pergunta (sem aplicar mensagem inteira; pontos não são copiáveis, ver decisões);
   - estados de carregando, transcrevendo, erro, vazio e resultado.
-- [ ] Criar o hook `usePitaco`:
+- [x] Criar o hook `usePitaco`:
   - lê a conversa no clique;
-  - chama `ensureTranscripts`;
+  - chama `prepareConversation` (transcrições);
   - envia para `generate-pitaco`;
   - ignora resposta antiga ao trocar de conversa;
   - reaproveita o último resultado da conversa e permite atualizar.
-- [ ] Abrir um painel fecha o outro (Revisar × Pitaco).
-- [ ] Esc e clique fora fecham o drawer; foco e `aria-live` acessíveis.
-- [ ] Evitar sobreposição com o `DayWidget` (drawer acima ou widget recolhido).
-- [ ] Temas claro/escuro e responsividade.
-- [ ] `check:bundle` valida botão, drawer e fluxo com transcrição.
+- [x] Abrir um painel fecha o outro (Revisar × Pitaco).
+- [x] Esc fecha o drawer (clique fora não, ver decisões); foco e `aria-live` acessíveis.
+- [x] Evitar sobreposição com o `DayWidget` (drawer acima ou widget recolhido).
+- [x] Temas claro/escuro e responsividade.
+- [x] `check:bundle` valida botão, drawer e fluxo com transcrição.
+
+> **Feito (20/10/2026):** `usePitaco` guarda o último Pitaco de cada conversa em memória (enquanto a
+> página está aberta); a conversa sem mensagem do cliente nem do vendedor vira um estado vazio sem
+> chamar o background. O progresso real aparece no `aria-live` ("Lendo a conversa…",
+> "Transcrevendo áudios 1 de 2…", "Gerando o Pitaco…"). Prompt 2026-10-20.2: perguntas sem
+> vocativo (o modelo começava com "Sergio, …").
+>
+> **No app real (conversa com 2 áudios):** gera em 8–10 s (~US$ 0,0008), rodapé "inclui 2 áudios
+> transcritos" vindo do cache, Esc fecha, reabrir mostra o guardado sem nova geração, e trocar de
+> conversa durante o "Atualizar" mostra "ainda não foi gerado" na nova conversa, sem vazar a
+> resposta da anterior. Visto só no tema escuro; o claro usa os mesmos tokens do card do Revisar.
+> `check:bundle` com 6 checagens novas (botões, transcrição antes de gerar, drawer, sem "Aplicar",
+> Esc + cache, sem erro): 50/50 na produção; 466 testes.
 
 ## Critérios de aceite
 

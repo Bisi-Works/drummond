@@ -7,9 +7,11 @@ import { getAdapter } from "~adapters"
 import type { ReviewDraftRequest, ReviewDraftResponse } from "~background/messages/review-draft"
 import { GlassesMark } from "~components/Brand"
 import { DayWidget } from "~components/DayWidget"
+import { PitacoDrawer, PitacoMark } from "~components/PitacoDrawer"
 import { Spinner } from "~components/Spinner"
 import { SuggestionCard, type ReviewState } from "~components/SuggestionCard"
 import { useComposerState, type Box } from "~hooks/useComposerState"
+import { usePitaco } from "~hooks/usePitaco"
 import { useTheme } from "~hooks/useTheme"
 import { PROMPT_VERSION } from "~lib/ai/prompts"
 import { registerBrandFont } from "~lib/brand-font"
@@ -50,6 +52,24 @@ const CARD_MIN_WIDTH = 320
 const CARD_GAP = 8
 const BUTTON_HEIGHT = 28
 const BUTTON_GAP = 8
+/**
+ * Drawer do Pitaco: preso à direita, na altura inteira. Ocupa o espaço à direita do campo de texto
+ * (o painel "Perfil" do Botconversa) para não cobrir o botão de enviar, entre o mínimo e o máximo
+ * abaixo, e nunca passa da tela menos a margem.
+ */
+const DRAWER_WIDTH = 400
+const DRAWER_MIN_WIDTH = 320
+const DRAWER_GAP = 8
+const DRAWER_MARGIN = 32
+
+const drawerWidth = (frame: Box | null) => {
+  const room = frame ? window.innerWidth - frame.right - DRAWER_GAP : DRAWER_WIDTH
+  const width = Math.min(DRAWER_WIDTH, Math.max(DRAWER_MIN_WIDTH, room))
+  return Math.min(width, window.innerWidth - DRAWER_MARGIN)
+}
+
+const pillBase =
+  "flex items-center gap-1.5 rounded-full border pl-2.5 pr-3 text-xs font-medium shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
 
 // Na barra do campo, logo à direita da âncora (espaço livre); sem âncora, flutua acima do campo.
 const buttonPosition = (frame: Box, anchor: Box | null) =>
@@ -75,6 +95,7 @@ const Companion = () => {
   const [applyError, setApplyError] = useState<string | null>(null)
   // Descarta respostas que chegam depois de trocar de conversa ou de uma nova revisão.
   const requestId = useRef(0)
+  const pitaco = usePitaco(adapter, conversationKey)
 
   useEffect(() => {
     requestId.current++
@@ -87,17 +108,31 @@ const Companion = () => {
     setApplyError(null)
   }, [])
 
+  // Esc fecha o que estiver aberto (o card do Revisar e o drawer do Pitaco nunca abrem juntos).
+  // Clicar fora não fecha o drawer: o vendedor consulta o Pitaco enquanto escreve no campo.
+  const closePitaco = pitaco.close
   useEffect(() => {
-    if (review.kind === "idle") return
-    const onKeyDown = (event: KeyboardEvent) => event.key === "Escape" && dismiss()
+    if (review.kind === "idle" && !pitaco.isOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      dismiss()
+      closePitaco()
+    }
     document.addEventListener("keydown", onKeyDown, true)
     return () => document.removeEventListener("keydown", onKeyDown, true)
-  }, [review.kind, dismiss])
+  }, [review.kind, pitaco.isOpen, dismiss, closePitaco])
+
+  const togglePitaco = () => {
+    if (pitaco.isOpen) return pitaco.close()
+    dismiss()
+    pitaco.open()
+  }
 
   const runReview = async () => {
     if (!adapter) return
     const text = adapter.readDraft()
     if (!text.trim()) return
+    pitaco.close()
 
     // Conversa da revisão no momento do clique: se o vendedor trocar de conversa antes da
     // resposta, o sinal ainda é anexado à conversa certa.
@@ -154,24 +189,38 @@ const Companion = () => {
 
       {composerFrame && (
         <>
-          <button
-            type="button"
-            onClick={review.kind === "idle" ? runReview : dismiss}
-            disabled={!hasDraft && review.kind === "idle"}
-            title={hasDraft ? "Revisar a mensagem com IA" : "Digite uma mensagem para revisar"}
+          <div
             style={{
               position: "fixed",
               height: BUTTON_HEIGHT,
               ...buttonPosition(composerFrame, buttonAnchor)
             }}
-            className="flex items-center gap-1.5 rounded-full border border-black bg-black pl-2.5 pr-3 text-xs font-medium text-white shadow-sm transition hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-white disabled:text-gray-400 disabled:shadow-none">
-            {review.kind === "loading" ? (
-              <Spinner className="h-3.5 w-3.5" />
-            ) : (
-              <GlassesMark className="h-[11px] w-[18px]" />
-            )}
-            {copied ? "Copiado ✓" : review.kind === "idle" ? "Revisar" : "Fechar"}
-          </button>
+            className="flex items-stretch gap-1.5">
+            <button
+              type="button"
+              onClick={review.kind === "idle" ? runReview : dismiss}
+              disabled={!hasDraft && review.kind === "idle"}
+              title={hasDraft ? "Revisar a mensagem com IA" : "Digite uma mensagem para revisar"}
+              className={`${pillBase} border-black bg-black text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-white disabled:text-gray-400 disabled:shadow-none`}>
+              {review.kind === "loading" ? (
+                <Spinner className="h-3.5 w-3.5" />
+              ) : (
+                <GlassesMark className="h-[11px] w-[18px]" />
+              )}
+              {copied ? "Copiado ✓" : review.kind === "idle" ? "Revisar" : "Fechar"}
+            </button>
+            <button
+              type="button"
+              onClick={togglePitaco}
+              aria-pressed={pitaco.isOpen}
+              title={pitaco.isOpen ? "Fechar o Pitaco" : "Pitaco: por onde seguir a conversa (SPIN)"}
+              className={`${pillBase} border-black ${
+                pitaco.isOpen ? "bg-black text-white hover:bg-gray-800" : "bg-white text-black hover:bg-gray-100"
+              }`}>
+              <PitacoMark />
+              Pitaco
+            </button>
+          </div>
 
           {review.kind !== "idle" && (
             <div
@@ -193,6 +242,27 @@ const Companion = () => {
             </div>
           )}
         </>
+      )}
+
+      {/* Acima do widget do dia (z-50): enquanto o drawer está aberto, ele cobre o widget sem mexer
+          na posição salva pelo vendedor. */}
+      {pitaco.isOpen && (
+        <div
+          className="z-[60]"
+          style={{
+            position: "fixed",
+            top: 0,
+            right: 0,
+            bottom: 0,
+            width: drawerWidth(composerFrame || null)
+          }}>
+          <PitacoDrawer
+            state={pitaco.state}
+            contactName={adapter.getContactName?.()}
+            onRefresh={pitaco.refresh}
+            onClose={pitaco.close}
+          />
+        </div>
       )}
     </div>
   )

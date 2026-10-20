@@ -525,6 +525,86 @@ try {
   check(false, `widget executa sem erro: ${error.stack ?? error}`)
 }
 
+// 5a'. Botão e drawer do Pitaco no content script --------------------------------------------------
+// O fluxo inteiro do clique, com o background simulado: a conversa da fixture ganha um áudio (com
+// `src` na página), o content script baixa e manda transcrever, e o Pitaco recebe a transcrição.
+try {
+  const contentScript = manifest.content_scripts?.[0]
+  const window = new Window({ url: "https://app.botconversa.com.br/1/inbox?chat_id=123" })
+  window.document.write(readFileSync("tests/fixtures/botconversa-inbox.html", "utf8"))
+  window.document
+    .querySelector('[data-message-id="wamid.M09"] ._root_bdy01_1')
+    .insertAdjacentHTML("beforeend", '<audio src="https://app.botconversa.com.br/media/m09.ogg"></audio>')
+  // O happy-dom não faz layout: sem uma caixa com tamanho, o campo de texto "não está visível" e o
+  // botão não aparece.
+  window.HTMLElement.prototype.getBoundingClientRect = () =>
+    ({ top: 600, left: 300, right: 900, bottom: 660, width: 600, height: 60, x: 300, y: 600, toJSON() {} })
+  window.fetch = async () =>
+    new window.Response(new window.Blob([new Uint8Array([1, 2, 3, 4])], { type: "audio/ogg" }))
+
+  const chrome = chromeWithStorage()
+  const sent = []
+  chrome.runtime.sendMessage = async (_extensionId, message) => {
+    sent.push(message)
+    if (message?.name === "transcribe-audio") {
+      return { ok: true, text: "Quero trocar de carro.", meta: { model: "fake", durationMs: 1, cached: false } }
+    }
+    if (message?.name === "generate-pitaco") {
+      const data = { ...fakeModel.pitaco, points: fakeModel.pitaco.points.map((p) => ({ ...p, evidence: [1] })) }
+      return { ok: true, data, meta: { model: "fake", promptVersion: "x", durationMs: 1000 } }
+    }
+    return undefined
+  }
+  window.chrome = chrome
+
+  const errors = []
+  window.addEventListener("error", (event) => errors.push(event.error ?? event.message))
+  for (const file of contentScript.js) window.eval(read(file))
+  await new Promise((resolve) => setTimeout(resolve, 400))
+
+  const root = window.document.querySelector("plasmo-csui")?.shadowRoot ?? window.document
+  const button = (label) => Array.from(root.querySelectorAll("button")).find((b) => b.textContent.trim() === label)
+  const pitacoButton = button("Pitaco")
+  check(!!pitacoButton && !!button("Revisar"), "botões Revisar e Pitaco lado a lado na barra do campo")
+
+  pitacoButton?.click()
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  const drawer = root.querySelector("aside[role=dialog]")
+  const transcribe = sent.find((m) => m?.name === "transcribe-audio")
+  const generate = sent.find((m) => m?.name === "generate-pitaco")
+  const audio = generate?.body?.conversation?.find((m) => m.audio)
+  check(
+    transcribe?.body?.audioBase64 === "AQIDBA==" && audio?.transcript === "Quero trocar de carro.",
+    `Pitaco transcreve o áudio antes de gerar (${audio ? `transcrição: ${audio.transcript ?? "nenhuma"}` : "sem áudio na conversa"})`
+  )
+  const text = drawer?.textContent ?? ""
+  check(
+    text.includes(fakeModel.pitaco.diagnosis) && text.includes("inclui 1 áudio transcrito"),
+    "drawer mostra o Pitaco e o áudio transcrito"
+  )
+  const labels = Array.from(drawer?.querySelectorAll("button") ?? []).map((b) => b.getAttribute("aria-label") ?? b.textContent.trim())
+  check(
+    !labels.some((label) => /aplicar/i.test(label)) &&
+      labels.filter((label) => label === "Copiar pergunta").length === fakeModel.pitaco.questions.length,
+    `drawer sem "Aplicar"; só as perguntas são copiáveis (${labels.join(" · ")})`
+  )
+
+  window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  const closed = !root.querySelector("aside[role=dialog]")
+  button("Pitaco")?.click()
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  const generations = sent.filter((m) => m?.name === "generate-pitaco").length
+  check(
+    closed && !!root.querySelector("aside[role=dialog]") && generations === 1,
+    `Esc fecha o drawer e reabrir usa o Pitaco guardado (${generations} geração(ões))`
+  )
+  check(errors.length === 0, `Pitaco executa sem erro${errors.length ? `: ${errors[0]}` : ""}`)
+  await window.happyDOM.close()
+} catch (error) {
+  check(false, `Pitaco executa sem erro: ${error.stack ?? error}`)
+}
+
 // 5b. Página do relatório (tabs/report.html) ------------------------------------------------------
 try {
   const reportHtml = read("tabs/report.html")
