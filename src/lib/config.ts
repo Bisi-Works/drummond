@@ -95,6 +95,33 @@ const report: ModelConfig = {
 }
 
 /**
+ * Speech-to-text dos áudios da conversa. O Whisper no OpenRouter é um modelo
+ * `audio->transcription`: não aceita `response_format`, temperatura nem raciocínio, então a
+ * chamada de transcrição é separada das tarefas de JSON.
+ */
+export interface SttConfig {
+  enabled: boolean
+  model: string
+  providerOrder?: string[]
+  timeoutMs: number
+  /** Teto de tamanho por áudio; acima disso a mensagem fica sem transcrição. */
+  maxBytes: number
+  /** Teto de transcrições por dia (trava de custo). */
+  dailyLimit: number
+}
+
+const stt: SttConfig = {
+  enabled: process.env.PLASMO_PUBLIC_STT !== "off",
+  model: process.env.PLASMO_PUBLIC_STT_MODEL || "openai/whisper-large-v3-turbo",
+  providerOrder: toProviderOrder(
+    process.env.PLASMO_PUBLIC_STT_PROVIDER_ORDER ?? "deepinfra,groq"
+  ),
+  timeoutMs: toNumber(process.env.PLASMO_PUBLIC_STT_TIMEOUT_MS) ?? 60_000,
+  maxBytes: toNumber(process.env.PLASMO_PUBLIC_STT_MAX_BYTES) ?? 10 * 1024 * 1024,
+  dailyLimit: Math.max(1, Math.floor(toNumber(process.env.PLASMO_PUBLIC_STT_DAILY_LIMIT) ?? 1000))
+}
+
+/**
  * Decisão "o cliente só encerrou a conversa?" (ver `lib/ai/jev.ts`): roda depois da regra de texto,
  * só para mensagens curtas que ela não resolve. Falha ou dúvida = a conversa continua aguardando.
  */
@@ -112,6 +139,7 @@ export const config = {
   coach,
   report,
   closing,
+  stt,
   contextMessages: toNumber(process.env.PLASMO_PUBLIC_CONTEXT_MESSAGES) ?? 20,
   /** O coaching olha a conversa inteira carregada na tela, até este limite. */
   coachMessages: 80,

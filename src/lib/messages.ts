@@ -1,4 +1,5 @@
 import type { ChatMessage } from "~adapters/types"
+import type { CostInfo } from "~lib/ai/cost"
 import type { CoachingReport, DailyReport } from "~lib/ai/schemas"
 import type { AiResult } from "~lib/ai/service"
 import type { DailyReportInput } from "~lib/tracking/report"
@@ -57,6 +58,35 @@ export interface OpenReportResponse {
   /** Motivo quando `ok` é falso (ex.: o navegador recusou abrir a aba). */
   error?: string
 }
+
+// Speech-to-text dos áudios da conversa. O content script busca o áudio na página e manda os bytes
+// em base64; o background fala com o OpenRouter e guarda a transcrição por `messageKey`.
+export const TRANSCRIBE_AUDIO = "transcribe-audio"
+
+export interface TranscribeAudioRequest {
+  platform: string
+  conversationKey: string
+  messageKey: string
+  mimeType: string
+  /** Áudio em base64, pronto para o `input_audio` do OpenRouter. */
+  audioBase64: string
+  /** Tamanho original em bytes, para o teto de tamanho. */
+  bytes?: number
+}
+
+export interface TranscribeAudioMeta {
+  model: string
+  durationMs: number
+  /** `true` quando veio do cache, sem chamada ao provedor. */
+  cached: boolean
+  /** Só no `pnpm dev` e quando houve chamada ao modelo. */
+  cost?: CostInfo
+}
+
+export type TranscribeAudioResponse = (
+  | { ok: true; text: string }
+  | { ok: false; error: string }
+) & { meta: TranscribeAudioMeta }
 
 // Decidir se a última mensagem do cliente é só um encerramento também passa pelo background: a
 // chave do OpenRouter nunca chega ao content script. O texto é curto (a regra de texto filtra antes).

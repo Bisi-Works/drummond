@@ -1,6 +1,6 @@
 import { isClosingMessage } from "~lib/tracking/closing"
 
-import type { InboxChat, InboxMessage, InboxMessageKind, InboxResult } from "./types"
+import type { InboxChat, InboxMedia, InboxMessage, InboxMessageKind, InboxResult } from "./types"
 
 // Lista de chats do Botconversa direto da API que a própria inbox usa (mapeada em 08/10/2026).
 // Dá o que o DOM não dá: o horário REAL da última mensagem, de quem foi, e todos os chats do
@@ -26,6 +26,8 @@ export interface BotconversaApiDeps {
   storage: Pick<Storage, "getItem">
   /** `location.pathname` da inbox: `/<companyId>/inbox`. */
   pathname: string
+  /** `chat_id` da conversa aberta (`?chat_id=`), quando houver. */
+  chatId?: string | null
   /** Só para teste (`config.inboxUserId`): chats de outro membro no lugar de "meus chats". */
   userIdFilter?: number
 }
@@ -183,6 +185,44 @@ export const listBotconversaChats = async (
   return { ok: true, chats: [...chats.values()], complete: false }
 }
 
+const text = (value: unknown) =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined
+
+/** Ids da plataforma podem vir como número (ex.: `media_id`), então aceitamos os dois tipos. */
+const idText = (value: unknown) =>
+  typeof value === "number" && Number.isFinite(value)
+    ? String(value)
+    : text(value)
+
+const count = (value: unknown) =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined
+
+/**
+ * Normaliza o anexo de uma mensagem. A API responde em snake_case (o app cameliza), mas aceitamos
+ * as duas formas porque a mídia é o único ponto do payload que não está documentado.
+ * `media_s3_url`/`media_external_url` são as mesmas que o player usa (`resolveMediaUrl`).
+ */
+export const toInboxMedia = (raw: unknown): InboxMedia | undefined => {
+  if (!isRecord(raw)) return undefined
+  const url =
+    text(raw.media_s3_url) ??
+    text(raw.mediaS3Url) ??
+    text(raw.media_external_url) ??
+    text(raw.mediaExternalUrl)
+  const mimeType = text(raw.mime_type) ?? text(raw.mimeType)
+  const byteSize = count(raw.file_size) ?? count(raw.fileSize)
+  const duration = count(raw.duration)
+  const mediaId = idText(raw.media_id) ?? idText(raw.mediaId)
+  if (!url && !mimeType && byteSize === undefined && duration === undefined && !mediaId) return undefined
+  return {
+    ...(url && { url }),
+    ...(mimeType && { mimeType }),
+    ...(byteSize !== undefined && { byteSize }),
+    ...(duration !== undefined && { duration }),
+    ...(mediaId && { mediaId })
+  }
+}
+
 /**
  * Normaliza uma mensagem de `jwt_api/messages/<chat_id>/`; `null` quando falta o essencial. Nota
  * interna (`note_id`) e evento de sistema ficam marcados, para quem consome pular. Mídia sem texto
@@ -194,11 +234,16 @@ export const toInboxMessage = (raw: unknown): InboxMessage | null => {
   const content = typeof raw.message_content === "string" ? raw.message_content.trim() : ""
   const kind: InboxMessageKind =
     raw.note_id !== null && raw.note_id !== undefined ? "note" : type === "system" ? "system" : "message"
+  // `message_id` é o mesmo valor que a inbox renderiza em `[data-message-id]`.
+  const key = text(raw.message_id) ?? text(raw.messageId)
+  const media = toInboxMedia(Array.isArray(raw.media) ? raw.media[0] : raw.media)
   return {
     fromAccount: raw.is_from_account,
     text: content || (type && type !== "text" ? `[${type}]` : ""),
     at: raw.timestamp * 1000, // a API manda em segundos
-    kind
+    kind,
+    ...(key && { key }),
+    ...(media && { media })
   }
 }
 
@@ -234,4 +279,101 @@ export const listBotconversaMessages = async (
   }
   // A API já manda a mais nova primeiro; ordenar garante o contrato mesmo se isso mudar.
   return messages.sort((a, b) => b.at - a.at)
+}
+
+/** Janela de mensagens consultada ao procurar a mídia (mesmo tamanho que o app usa na conversa). */
+const MEDIA_WINDOW = 25
+
+/** Vida curta para não repetir a mesma listagem quando vários áudios são transcritos juntos. */
+const MEDIA_CACHE_TTL = 10_000
+
+const mediaCache = new Map<string, { at: number; byKey: Map<string, InboxMedia> }>()
+
+/** Esquece as listagens guardadas (para os testes não vazarem estado entre si). */
+export const resetMediaCache = () => mediaCache.clear()
+
+const loadMediaIndex = async (
+  chatId: string,
+  deps: BotconversaApiDeps
+): Promise<Map<string, InboxMedia> | null> => {
+  const cached = mediaCache.get(chatId)
+  if (cached && Date.now() - cached.at < MEDIA_CACHE_TTL) return cached.byKey
+
+  const token = readAuthToken(deps.storage)
+  const companyId = readCompanyId(deps.pathname)
+  if (!token || !companyId) return null
+
+  const bot = await loadBotId(deps, token, companyId)
+  if (!bot.ok) return null
+
+  const query = new URLSearchParams({
+    bot_id: String(bot.botId),
+    limit: String(MEDIA_WINDOW),
+    show_system_messages: "false"
+  })
+  const result = await request(deps, token, `${CHATS_HOST}/jwt_api/messages/${chatId}/?${query}`)
+  if (!result.ok || !isRecord(result.json) || !Array.isArray(result.json.messages)) {
+    return null
+  }
+
+  const byKey = new Map<string, InboxMedia>()
+  for (const raw of result.json.messages) {
+    const message = toInboxMessage(raw)
+    // A URL pode não vir (contas oficiais): aí o `mediaId` identifica o arquivo no download.
+    if (message?.key && message.media && (message.media.url || message.media.mediaId)) {
+      byKey.set(message.key, message.media)
+    }
+  }
+
+  mediaCache.set(chatId, { at: Date.now(), byKey })
+  return byKey
+}
+
+/**
+ * Mídia de uma mensagem pela API da inbox. É o único caminho para o áudio: o player do Botconversa
+ * é próprio e não deixa `<audio>`/`src` no DOM — a URL vem em `media[0]` (`mediaS3Url` ou
+ * `mediaExternalUrl`). Casa pelo `message_id`, o mesmo valor de `[data-message-id]`. Nunca lança.
+ */
+export const loadBotconversaMedia = async (
+  messageKey: string,
+  deps: BotconversaApiDeps
+): Promise<InboxMedia | null> => {
+  const chatId = deps.chatId
+  if (!messageKey || !chatId || !/^\d+$/.test(chatId)) return null
+  const index = await loadMediaIndex(chatId, deps)
+  return index?.get(messageKey) ?? null
+}
+
+/**
+ * Baixa o áudio de uma mídia pela rota que a inbox usa quando não há URL pronta
+ * (`jwt_api/chat/get_media_url/`): a resposta já é o arquivo, não um JSON. É o caminho das contas
+ * oficiais, em que `media[0]` traz `media_id`/`mime_type` mas `media_s3_url` e
+ * `media_external_url` vêm vazios. Nunca lança; qualquer falha devolve `null`.
+ */
+export const downloadBotconversaAudio = async (
+  media: InboxMedia,
+  deps: BotconversaApiDeps
+): Promise<{ blob: Blob; mimeType: string } | null> => {
+  if (!media.mediaId) return null
+  const token = readAuthToken(deps.storage)
+  const companyId = readCompanyId(deps.pathname)
+  if (!token || !companyId) return null
+
+  const bot = await loadBotId(deps, token, companyId)
+  if (!bot.ok) return null
+
+  const url = new URL(`${CHATS_HOST}/jwt_api/chat/get_media_url/`)
+  url.searchParams.set("bot_id", String(bot.botId))
+  url.searchParams.set("media_id", media.mediaId)
+  try {
+    const response = await deps.fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${token}`, Accept: "audio/*" }
+    })
+    if (!response.ok) return null
+    const blob = await response.blob()
+    if (blob.size === 0) return null
+    return { blob, mimeType: blob.type || media.mimeType || "audio/ogg" }
+  } catch {
+    return null
+  }
 }

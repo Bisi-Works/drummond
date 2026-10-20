@@ -148,24 +148,18 @@ usar o `pnpm release`. A API publica com a última visibilidade que foi publicad
 
 **Finalidade única**
 
-> Ajudar vendedores que atendem pelo Botconversa com IA: revisar mensagens antes do envio, dar
-> coaching sobre a conversa e acompanhar as conversas do dia.
+Ajudar vendedores que atendem pelo Botconversa com IA: revisar mensagens antes do envio, dar
+coaching sobre a conversa e acompanhar as conversas do dia.
 
 **Justificativa das permissões**
 
 - `sidePanel`:
-  > Mostra o painel lateral com o coaching da conversa e o resumo do dia, aberto quando o vendedor
-  > clica no ícone da extensão.
+Mostra o painel lateral com o coaching da conversa e o resumo do dia, aberto quando o vendedor
+clica no ícone da extensão.
 - `storage`:
-  > Guarda no próprio navegador o acompanhamento das conversas do dia, os relatórios gerados, o
-  > limite de um relatório por dia e as preferências (tema e posição do widget).
+Guarda no próprio navegador o acompanhamento das conversas do dia, os relatórios gerados, o limite de um relatório por dia e as preferências (tema e posição do widget).
 - **Permissão de host** (`app.botconversa.com.br` e `openrouter.ai`):
-  > app.botconversa.com.br: o content script lê a conversa aberta e o rascunho, adiciona o botão
-  > "Revisar" e o widget do dia e consulta a lista de chats do vendedor na API do Botconversa,
-  > usando a sessão da própria página. openrouter.ai: é o único serviço de IA usado. Recebe o
-  > texto a revisar ou analisar quando o vendedor pede. Também recebe as mensagens curtas do
-  > cliente, junto com a mensagem anterior do vendedor, para decidir se o cliente só se despediu
-  > e a conversa não está mais aguardando resposta.
+app.botconversa.com.br: o content script lê a conversa aberta e o rascunho, adiciona o botão "Revisar" e o widget do dia e consulta a lista de chats do vendedor na API do Botconversa, usando a sessão da própria página. openrouter.ai: é o único serviço de IA usado. Recebe o texto a revisar ou analisar quando o vendedor pede. Também recebe as mensagens curtas do cliente, junto com a mensagem anterior do vendedor, para decidir se o cliente só se despediu e a conversa não está mais aguardando resposta.
 
 **Código remoto**: *Não, não estou usando código remoto.* Todo o JavaScript vai no pacote, e o
 OpenRouter devolve só dados (JSON).

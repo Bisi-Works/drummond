@@ -10,8 +10,9 @@ const PRESERVED_KEYS = new Set([WIDGET_POSITION_KEY])
 const NAMESPACE = "drummond."
 
 /**
- * Apaga os logs de todos os dias, os relatórios gerados e a trava diária. Preserva a posição do
- * widget e o tema (`theme`), que não são dados de tracking. Devolve quantas chaves foram apagadas;
+ * Apaga os logs de todos os dias, os relatórios gerados, as transcrições de áudio e a trava
+ * diária. Preserva a posição do widget e o tema (`theme`), que não são dados de tracking. Devolve
+ * quantas chaves foram apagadas;
  * `null` quando não há storage ou a limpeza falhou — quem chama não deve mostrar sucesso nesse caso.
  */
 export const clearSavedData = async (): Promise<number | null> => {

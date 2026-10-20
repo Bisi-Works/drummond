@@ -3,14 +3,16 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   botconversaAdapter,
+  readBotconversaAudioSource,
   readBotconversaContactName,
   readBotconversaConversation,
   visualOrder
 } from "~adapters/botconversa"
+import { resetBotIdCache, resetMediaCache } from "~adapters/botconversa-api"
 
 // `URL` aqui é a implementação do happy-dom, que não aceita file:// — por isso fileURLToPath.
 const fixturePath = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "botconversa-inbox.html")
@@ -20,6 +22,13 @@ beforeEach(() => {
   document.open()
   document.write(fixture)
   document.close()
+  resetBotIdCache()
+  resetMediaCache()
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  localStorage.clear()
 })
 
 describe("readBotconversaConversation", () => {
@@ -73,6 +82,16 @@ describe("readBotconversaConversation", () => {
     ])
   })
 
+  it("mantém a messageKey estável mesmo quando a conversa é cortada", () => {
+    const full = readBotconversaConversation(document, 50)
+    const lastThree = readBotconversaConversation(document, 3)
+
+    expect(lastThree.map((m) => [m.id, m.messageKey])).toEqual(
+      full.slice(-3).map((m, index) => [index + 1, m.messageKey])
+    )
+    expect(lastThree.map((m) => m.messageKey)).toEqual(["wamid.M08", "wamid.M09", "wamid.M10"])
+  })
+
   it("descreve mensagens só com imagem", () => {
     document.body.innerHTML = `
       <div class="_chatArea_x1"><div data-message-id="1" class="_root_m1 _fromMe_m1">
@@ -80,7 +99,7 @@ describe("readBotconversaConversation", () => {
         <div class="_absolute_a1"><div class="paragraph-xsmall">14:17</div></div>
       </div></div>`
     expect(readBotconversaConversation(document, 50)).toEqual([
-      { id: 1, author: "vendedor", text: "[imagem]", time: "14:17" }
+      { id: 1, author: "vendedor", text: "[imagem]", time: "14:17", messageKey: "1" }
     ])
   })
 
@@ -102,8 +121,22 @@ describe("readBotconversaConversation", () => {
         </div>
       </div>`
     expect(readBotconversaConversation(document, 50)).toEqual([
-      { id: 1, author: "vendedor", text: "[áudio]", time: undefined },
-      { id: 2, author: "cliente", text: "[áudio]", time: "14:20" }
+      {
+        id: 1,
+        author: "vendedor",
+        text: "[áudio]",
+        time: undefined,
+        messageKey: "1",
+        audio: true
+      },
+      {
+        id: 2,
+        author: "cliente",
+        text: "[áudio]",
+        time: "14:20",
+        messageKey: "2",
+        audio: true
+      }
     ])
   })
 
@@ -133,6 +166,151 @@ describe("readBotconversaConversation", () => {
   it("retorna vazio fora da tela de chat", () => {
     document.body.innerHTML = "<main>Painel de controle</main>"
     expect(readBotconversaConversation(document, 50)).toEqual([])
+  })
+})
+
+describe("readBotconversaAudioSource", () => {
+  it("lê o src direto do elemento audio", () => {
+    document.body.innerHTML = `
+      <div data-message-id="audio-1">
+        <audio src="https://cdn.example/nota.ogg" type="audio/ogg"></audio>
+      </div>`
+
+    expect(readBotconversaAudioSource(document, "audio-1")).toEqual({
+      url: "https://cdn.example/nota.ogg",
+      mimeType: "audio/ogg"
+    })
+  })
+
+  it("cai para o source interno e para o atributo data-audio-url", () => {
+    document.body.innerHTML = `
+      <div data-message-id="audio-2">
+        <audio><source src="blob:https://app.botconversa.com.br/123" type="audio/ogg"></audio>
+      </div>
+      <div data-message-id="audio-3" data-audio-url="https://cdn.example/3.mp3"></div>`
+
+    expect(readBotconversaAudioSource(document, "audio-2")).toEqual({
+      url: "blob:https://app.botconversa.com.br/123",
+      mimeType: "audio/ogg"
+    })
+    expect(readBotconversaAudioSource(document, "audio-3")).toEqual({
+      url: "https://cdn.example/3.mp3"
+    })
+  })
+
+  it("devolve null para mensagem ausente ou sem fonte de áudio", () => {
+    document.body.innerHTML = '<div data-message-id="texto">Oi</div>'
+
+    expect(readBotconversaAudioSource(document, "nao-existe")).toBeNull()
+    expect(readBotconversaAudioSource(document, "texto")).toBeNull()
+  })
+})
+
+describe("readAudio", () => {
+  const messageWire = (id: string, url: string | null, mediaId = "") =>
+    JSON.stringify({
+      messages: [
+        {
+          message_id: id,
+          message_content: mediaId,
+          message_type: "audio",
+          is_from_account: false,
+          timestamp: 1791471958,
+          note_id: null,
+          media: [{ media_s3_url: url, media_id: mediaId, mime_type: "audio/ogg", file_size: 3, duration: 1 }]
+        }
+      ]
+    })
+
+  const stubApi = (id: string, url: string | null, mediaId = "") => {
+    const calls: string[] = []
+    const impl = vi.fn(async (target: RequestInfo | URL) => {
+      const value = String(target)
+      calls.push(value)
+      if (value.includes("/companies/")) return new Response(JSON.stringify({ bot: 555 }), { status: 200 })
+      if (value.includes("/jwt_api/messages/")) return new Response(messageWire(id, url, mediaId), { status: 200 })
+      if (value.startsWith("https://bucket.example/")) {
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { "content-type": "audio/ogg" }
+        })
+      }
+      return new Response("", { status: 404 })
+    })
+    vi.stubGlobal("fetch", impl)
+    return { impl, calls }
+  }
+
+  beforeEach(() => {
+    window.history.replaceState({}, "", "/110105/inbox?chat_id=38100790")
+    localStorage.setItem("authToken", "jwt-token")
+  })
+
+  it("busca o áudio pela API quando o DOM não expõe a fonte (player próprio)", async () => {
+    const { calls } = stubApi("wamid.M10", "https://bucket.example/a.ogg")
+
+    const audio = await botconversaAdapter.readAudio!("wamid.M10")
+
+    expect(audio?.mimeType).toBe("audio/ogg")
+    expect(audio?.blob.size).toBe(3)
+    expect(calls.at(-1)).toBe("https://bucket.example/a.ogg")
+  })
+
+  it("cai para a API quando o src do DOM não responde", async () => {
+    document.body.innerHTML = `
+      <div data-message-id="wamid.M10">
+        <audio src="https://cdn.example/quebrado.ogg" type="audio/ogg"></audio>
+      </div>`
+    stubApi("wamid.M10", "https://bucket.example/a.ogg")
+
+    const audio = await botconversaAdapter.readAudio!("wamid.M10")
+
+    expect(audio?.blob.size).toBe(3)
+  })
+
+  it("baixa por get_media_url quando a API não traz URL (conta oficial)", async () => {
+    const calls: string[] = []
+    const impl = vi.fn(async (target: RequestInfo | URL) => {
+      const value = String(target)
+      calls.push(value)
+      if (value.includes("/companies/")) return new Response(JSON.stringify({ bot: 555 }), { status: 200 })
+      if (value.includes("/jwt_api/messages/")) {
+        return new Response(messageWire("wamid.M10", "", "2242648623129802"), { status: 200 })
+      }
+      if (value.includes("/jwt_api/chat/get_media_url/")) {
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { "content-type": "audio/ogg" }
+        })
+      }
+      return new Response("", { status: 404 })
+    })
+    vi.stubGlobal("fetch", impl)
+
+    const audio = await botconversaAdapter.readAudio!("wamid.M10")
+
+    expect(audio?.blob.size).toBe(3)
+    expect(audio?.mimeType).toBe("audio/ogg")
+    const mediaUrl = new URL(calls.find((value) => value.includes("get_media_url"))!)
+    expect(mediaUrl.searchParams.get("media_id")).toBe("2242648623129802")
+    expect(mediaUrl.searchParams.get("bot_id")).toBe("555")
+  })
+
+  it("devolve null quando a API não tem a mídia ou a URL não responde", async () => {
+    stubApi("wamid.M10", null)
+    expect(await botconversaAdapter.readAudio!("wamid.M10")).toBeNull()
+
+    resetMediaCache()
+    const failing = vi.fn(async (target: RequestInfo | URL) => {
+      const value = String(target)
+      if (value.includes("/companies/")) return new Response(JSON.stringify({ bot: 555 }), { status: 200 })
+      if (value.includes("/jwt_api/messages/")) {
+        return new Response(messageWire("wamid.M10", "https://bucket.example/erro.ogg"), { status: 200 })
+      }
+      return new Response("", { status: 404 })
+    })
+    vi.stubGlobal("fetch", failing)
+    expect(await botconversaAdapter.readAudio!("wamid.M10")).toBeNull()
   })
 })
 

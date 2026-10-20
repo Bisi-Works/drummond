@@ -293,7 +293,10 @@ export const formatConversation = (messages: ChatMessage[]) => {
     .map((m) => {
       const label = AUTHOR_LABEL[m.author] + (m.template ? " (modelo)" : "")
       const time = m.time ? ` ${m.time}` : ""
-      return `[${m.id}] ${label}${time}: ${neutralizeTags(m.text.trim())}`
+      // A transcrição acompanha o marcador `[áudio]`; sem ela, o modelo continua proibido de
+      // supor o que o áudio dizia.
+      const transcript = m.transcript ? ` (transcrição: "${neutralizeTags(m.transcript)}")` : ""
+      return `[${m.id}] ${label}${time}: ${neutralizeTags(m.text.trim())}${transcript}`
     })
     .join("\n")
 }

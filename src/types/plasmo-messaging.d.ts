@@ -15,5 +15,6 @@ declare module "@plasmohq/messaging" {
     "generate-report": {}
     "open-report": {}
     "classify-closing": {}
+    "transcribe-audio": {}
   }
 }

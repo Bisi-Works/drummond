@@ -17,6 +17,7 @@ import { config as appConfig } from "~lib/config"
 import { GET_CONVERSATION, type GetConversationResponse } from "~lib/messages"
 import { reviewSignal } from "~lib/tracking/signals"
 import { recordReview } from "~lib/tracking/store"
+import { prepareConversation } from "~lib/transcripts/ensure"
 
 // Precisa listar os mesmos domínios que os `hosts` dos adapters (o Plasmo lê este objeto estaticamente).
 export const config: PlasmoCSConfig = {
@@ -106,9 +107,14 @@ const Companion = () => {
     setApplyError(null)
     let response: ReviewDraftResponse
     try {
+      // A revisão também enxerga o conteúdo dos áudios: o cache por mensagem evita transcrever o
+      // mesmo áudio de novo em cada clique.
+      const rawConversation = adapter.readConversation(appConfig.contextMessages)
+      const prepared = key ? await prepareConversation(adapter, rawConversation, key) : null
+      if (id !== requestId.current) return
       response = await sendToBackground<ReviewDraftRequest, ReviewDraftResponse>({
         name: "review-draft",
-        body: { conversation: adapter.readConversation(appConfig.contextMessages), draft: text }
+        body: { conversation: prepared?.conversation ?? rawConversation, draft: text }
       })
     } catch {
       // Acontece quando a extensão é recarregada com a página aberta.

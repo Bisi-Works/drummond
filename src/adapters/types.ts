@@ -21,6 +21,17 @@ export interface InboxChat {
   preview: string
 }
 
+/** Anexo de uma mensagem, quando a API da plataforma informa de onde baixá-lo. */
+export interface InboxMedia {
+  /** URL do arquivo (S3 ou assinada). Ausente quando a plataforma só entrega por download autenticado. */
+  url?: string
+  mimeType?: string
+  byteSize?: number
+  duration?: number
+  /** Id da mídia na plataforma. */
+  mediaId?: string
+}
+
 /** Uma mensagem de um chat, como a API da plataforma a devolve (sem abrir a conversa). */
 export interface InboxMessage {
   /** `true` quando foi enviada pela nossa conta (vendedor, modelo ou bot). */
@@ -30,6 +41,10 @@ export interface InboxMessage {
   /** Horário real (epoch ms). */
   at: number
   kind: InboxMessageKind
+  /** Id estável da mensagem; casa com o `[data-message-id]` do DOM. */
+  key?: string
+  /** Anexo da mensagem (áudio, imagem, documento), quando a API informa. */
+  media?: InboxMedia
 }
 
 /**
@@ -50,6 +65,26 @@ export interface ChatMessage {
   time?: string
   /** Mensagem de modelo/template (geralmente disparada por automação ou campanha). */
   template?: boolean
+  /**
+   * Identificador estável da mensagem na plataforma (ex.: `data-message-id`), diferente do `id`
+   * ordinal. Serve para guardar transcrições e outros dados por mensagem sem depender do recorte
+   * de `readConversation(limit)`. Ausente em eventos de sistema e mensagens sem id na tela.
+   */
+  messageKey?: string
+  /**
+   * Transcrição do áudio, quando já existe no cache local. O `text` continua com o marcador
+   * `[áudio]`; quem monta o prompt anexa a transcrição como contexto.
+   */
+  transcript?: string
+  /** `true` quando a mensagem é um áudio (o `text` traz o marcador `[áudio]`). */
+  audio?: boolean
+}
+
+/** Áudio de uma mensagem, pronto para o pipeline de transcrição. */
+export interface ChatAudio {
+  blob: Blob
+  /** Mime do áudio (ex.: "audio/ogg"); usado para escolher o formato no OpenRouter. */
+  mimeType: string
 }
 
 /**
@@ -77,6 +112,11 @@ export interface ChatAdapter {
   writeDraft(text: string): Promise<boolean>
   /** Últimas `limit` mensagens da conversa aberta, em ordem cronológica. */
   readConversation(limit: number): ChatMessage[]
+  /**
+   * Áudio de uma mensagem, para o speech-to-text. Opcional: plataformas sem áudio ou sem acesso
+   * ao arquivo simplesmente não implementam. `null` quando a fonte não está acessível.
+   */
+  readAudio?(messageKey: string): Promise<ChatAudio | null>
   /** Identifica a conversa aberta, para descartar sugestões ao trocar de conversa. */
   getConversationKey(): string | null
   /**

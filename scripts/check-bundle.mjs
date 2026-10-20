@@ -120,6 +120,7 @@ const dailyInput = {
 const requests = []
 const priceLookups = []
 const decisionRequests = []
+const sttRequests = []
 const fetchStub = async (url, init) => {
   // Decisions API (Jev): responde como o OpenRouter, com as probabilidades da pergunta única.
   if (url.endsWith("/api/alpha/decisions")) {
@@ -140,6 +141,15 @@ const fetchStub = async (url, init) => {
     return new Response(JSON.stringify({ data: { endpoints: [endpoint] } }))
   }
   const body = JSON.parse(init.body)
+  // Transcrição (Whisper): a requisição tem conteúdo multimodal e não usa response_format.
+  if (body?.model === "openai/whisper-large-v3-turbo") {
+    sttRequests.push(body)
+    return new Response(JSON.stringify({
+      provider: "DeepInfra",
+      usage: { prompt_tokens: 200, completion_tokens: 20, cost: 0.00001 },
+      choices: [{ message: { content: "Transcrição do áudio." } }]
+    }))
+  }
   requests.push(body)
   const system = body.messages[0].content
   const isReview = system.includes("Tarefa: revisar o rascunho")
@@ -236,6 +246,45 @@ try {
   check(decision?.body.state.conversa.length === 2 && decision.body.questions.reply.type === "choice",
     "classify-closing: estado com a mensagem anterior do vendedor e pergunta Choice")
 
+  // Transcrição de áudio (Whisper): rota própria no background, com input_audio e sem parâmetros
+  // que o modelo audio->transcription não aceita.
+  const transcription = await deliver(listeners, {
+    name: "transcribe-audio",
+    body: {
+      platform: "botconversa",
+      conversationKey: "1",
+      messageKey: "wamid.AUDIO",
+      mimeType: "audio/ogg",
+      audioBase64: "AAAA",
+      bytes: 3
+    }
+  })
+  check(
+    transcription?.ok === true && transcription.text === "Transcrição do áudio.",
+    `transcribe-audio responde (${transcription?.ok ? "ok" : transcription?.error})`
+  )
+  const sttRequest = sttRequests[0]
+  check(
+    sttRequest?.model === "openai/whisper-large-v3-turbo" &&
+      sttRequest?.response_format === undefined &&
+      sttRequest?.provider?.require_parameters === undefined &&
+      sttRequest?.provider?.data_collection === "deny",
+    `transcrição usa o Whisper, sem response_format/require_parameters e com política de dados (${sttRequest?.provider?.order?.join(" → ") ?? "provedor padrão"})`
+  )
+  check(
+    Array.isArray(sttRequest?.messages?.[0]?.content) &&
+      sttRequest.messages[0].content.some((part) => part?.type === "input_audio"),
+    "transcrição envia input_audio em base64"
+  )
+  if (isDevBuild) {
+    check(
+      transcription?.meta?.cost?.effective?.usd === 0.00001,
+      `dev: custo efetivo da transcrição (${JSON.stringify(transcription?.meta?.cost?.effective ?? null)})`
+    )
+  } else {
+    check(transcription?.meta?.cost === undefined, "produção: transcrição sem custo na resposta")
+  }
+
   check(connectListeners.length > 0, "service worker registra o listener de conexões (coaching)")
   const messages = await connect(connectListeners, "coach-conversation", { conversation })
   const deltas = messages.filter((m) => m.type === "delta")
@@ -284,8 +333,10 @@ try {
   check(!!window.document.querySelector("plasmo-csui"), "content script monta a UI na página")
   const contentBundle = script.js.map(read).join("")
   check(
-    contentBundle.includes("generate-report") && contentBundle.includes("open-report"),
-    "content script referencia as rotas generate-report/open-report (sem a chave da API)"
+    contentBundle.includes("generate-report") &&
+      contentBundle.includes("open-report") &&
+      contentBundle.includes("transcribe-audio"),
+    "content script referencia as rotas generate-report/open-report/transcribe-audio (sem a chave da API)"
   )
   const response = await deliver(listeners, { name: "get-conversation" })
   check(response?.conversation?.length === 10 && response.conversationKey === "123", `get-conversation lê a conversa (${response?.conversation?.length ?? 0} mensagens)`)
