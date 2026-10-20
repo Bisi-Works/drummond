@@ -43,6 +43,10 @@ export const MAX_PITACO_POINTS = 4
 export const MAX_PITACO_QUESTIONS = 5
 export const MAX_PITACO_AVOID = 3
 export const MAX_PITACO_WARNINGS = 3
+// Resumo da visão simples: o que fazer e o que não fazer agora.
+export const MAX_PITACO_DO = 4
+/** Tópico do resumo acima disso (ou com quebra de linha) virou parágrafo: é descartado. */
+export const MAX_PITACO_TOPIC_CHARS = 160
 /** Pergunta maior que isso deixa de ser pergunta e vira mensagem pronta: é descartada. */
 export const MAX_PITACO_QUESTION_CHARS = 200
 /** A dica é direção de raciocínio; acima disso (ou com quebra de linha) ela é descartada. */

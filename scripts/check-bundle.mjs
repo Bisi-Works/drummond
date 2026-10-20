@@ -101,13 +101,20 @@ const fakeModel = {
       implicacao: { status: "pendente", evidence: "Não abordada." },
       necessidade: { status: "pendente", evidence: "Não abordada." }
     },
+    bant: {
+      budget: { status: "pendente", evidence: "Não abordado." },
+      authority: { status: "pendente", evidence: "Não abordado." },
+      need: { status: "parcial", evidence: "Só cumprimentou (#1)." },
+      timing: { status: "pendente", evidence: "Não abordado." }
+    },
     stageNow: "situacao",
     diagnosis: "Conversa no início, sem descoberta.",
     path: ["Entender o que o cliente procura"],
     points: [{ stage: "situacao", kind: "descobrir", title: "O que motivou o contato", why: "Só houve saudação (#1).", hint: "Entender o objetivo.", evidence: [1, 9] }],
     questions: [{ stage: "situacao", text: "O que fez você procurar a gente agora?", evidence: [1] }],
-    avoid: ["Falar de preço antes de entender o objetivo"],
-    warnings: []
+    warnings: [],
+    doNow: ["Perguntar o que motivou o contato"],
+    avoid: ["Falar de preço antes de entender o objetivo"]
   },
   // Relatório diário da rota "generate-report" (e do botão "Encerrar o dia" no widget).
   daily: {
@@ -273,7 +280,7 @@ try {
   )
   const pitacoRequest = requests.at(-1)
   check(
-    validFormat(pitacoRequest, "stages,stageNow,diagnosis,path,points,questions,avoid,warnings") &&
+    validFormat(pitacoRequest, "stages,bant,stageNow,diagnosis,path,points,questions,warnings,doNow,avoid") &&
       pitacoRequest?.provider?.require_parameters === true && !pitacoRequest?.stream,
     `pitaco: formato completo, provedor compatível e sem streaming (${describeRequest(pitacoRequest)})`
   )
@@ -588,8 +595,19 @@ try {
   )
   const text = drawer?.textContent ?? ""
   check(
-    text.includes(fakeModel.pitaco.diagnosis) && text.includes("inclui 1 áudio transcrito"),
-    "drawer mostra o Pitaco e o áudio transcrito"
+    text.includes("Fazer") && text.includes(fakeModel.pitaco.doNow[0]) && text.includes("Não fazer") &&
+      text.includes(fakeModel.pitaco.avoid[0]) && !text.includes(fakeModel.pitaco.diagnosis) &&
+      text.includes("inclui 1 áudio transcrito"),
+    "drawer abre na visão simples (Fazer / Não fazer) e mostra o áudio transcrito"
+  )
+  const drawerButton = (label) => Array.from(drawer?.querySelectorAll("button") ?? []).find((b) => b.textContent.trim() === label)
+  drawerButton("Avançado")?.click()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  const advanced = drawer?.textContent ?? ""
+  check(
+    advanced.includes(fakeModel.pitaco.diagnosis) && advanced.includes("Qualificação (BANT) · 0/4") &&
+      advanced.includes(fakeModel.pitaco.questions[0].text) && !!drawerButton("Simples"),
+    "Avançado mostra a análise completa (SPIN, BANT, diagnóstico e perguntas)"
   )
   const labels = Array.from(drawer?.querySelectorAll("button") ?? []).map((b) => b.getAttribute("aria-label") ?? b.textContent.trim())
   check(
@@ -604,9 +622,10 @@ try {
   button("Pitaco")?.click()
   await new Promise((resolve) => setTimeout(resolve, 100))
   const generations = sent.filter((m) => m?.name === "generate-pitaco").length
+  const reopened = root.querySelector("aside[role=dialog]")?.textContent ?? ""
   check(
-    closed && !!root.querySelector("aside[role=dialog]") && generations === 1,
-    `Esc fecha o drawer e reabrir usa o Pitaco guardado (${generations} geração(ões))`
+    closed && reopened.includes("Não fazer") && !reopened.includes(fakeModel.pitaco.diagnosis) && generations === 1,
+    `Esc fecha o drawer e reabrir usa o Pitaco guardado, de novo na visão simples (${generations} geração(ões))`
   )
 
   // Revisar e Coaching com o mesmo áudio: usam a transcrição do cache, sem novo pedido ao Whisper.

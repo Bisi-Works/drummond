@@ -14,6 +14,7 @@ import {
   MAX_IMPROVEMENTS,
   MAX_REPORT_ITEMS,
   MAX_PITACO_AVOID,
+  MAX_PITACO_DO,
   MAX_PITACO_PATH,
   MAX_PITACO_POINTS,
   MAX_PITACO_QUESTIONS,
@@ -139,6 +140,14 @@ const spinStageSchema = z.object({
     .describe("O que a conversa mostra sobre a etapa, citando #n. Se não foi abordada, diga isso.")
 })
 
+// O BANT do Pitaco só alimenta a análise e o modo Avançado: sem pergunta pronta, como no coaching.
+const pitacoBantItemSchema = z.object({
+  status: z.enum(bantStatuses).describe('"cumprido", "parcial" ou "pendente".'),
+  evidence: z
+    .string()
+    .describe("O que a conversa mostra sobre o critério, citando #n. Se não foi abordado, diga isso.")
+})
+
 const evidenceSchema = z
   .array(z.number())
   .describe("Números [n] das mensagens que sustentam o item. Vazio só se a conversa não tem nada sobre ele.")
@@ -152,6 +161,14 @@ export const pitacoSchema = z.object({
       necessidade: spinStageSchema
     })
     .describe("Status e evidência de cada etapa do SPIN."),
+  bant: z
+    .object({
+      budget: pitacoBantItemSchema,
+      authority: pitacoBantItemSchema,
+      need: pitacoBantItemSchema,
+      timing: pitacoBantItemSchema
+    })
+    .describe("Qualificação BANT do lead até aqui."),
   stageNow: z
     .enum(pitacoStages)
     .describe('Etapa em que a conversa está agora; "abertura" se a descoberta ainda não começou.'),
@@ -182,10 +199,14 @@ export const pitacoSchema = z.object({
       })
     )
     .describe(`Até ${MAX_PITACO_QUESTIONS} perguntas abertas que ainda não foram respondidas.`),
-  avoid: z.array(z.string()).describe(`Até ${MAX_PITACO_AVOID} coisas a não fazer agora.`),
   warnings: z
     .array(z.string())
-    .describe(`Até ${MAX_PITACO_WARNINGS} fatos a confirmar antes de falar. Vazio se não houver.`)
+    .describe(`Até ${MAX_PITACO_WARNINGS} fatos a confirmar antes de falar. Vazio se não houver.`),
+  // O resumo vem por último: o modelo o escreve depois de toda a análise acima.
+  doNow: z
+    .array(z.string())
+    .describe(`Até ${MAX_PITACO_DO} ações curtas a fazer agora, da mais para a menos urgente.`),
+  avoid: z.array(z.string()).describe(`Até ${MAX_PITACO_AVOID} coisas a não fazer agora.`)
 })
 
 export type DraftReview = z.infer<typeof draftReviewSchema>
@@ -229,7 +250,8 @@ export const limitPitaco = (pitaco: Pitaco): Pitaco => ({
   points: pitaco.points.slice(0, MAX_PITACO_POINTS),
   questions: pitaco.questions.slice(0, MAX_PITACO_QUESTIONS),
   avoid: pitaco.avoid.slice(0, MAX_PITACO_AVOID),
-  warnings: pitaco.warnings.slice(0, MAX_PITACO_WARNINGS)
+  warnings: pitaco.warnings.slice(0, MAX_PITACO_WARNINGS),
+  doNow: pitaco.doNow.slice(0, MAX_PITACO_DO)
 })
 
 /** Trunca as quatro listas do relatório diário em `MAX_REPORT_ITEMS`, preservando a ordem. */

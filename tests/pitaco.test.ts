@@ -18,6 +18,7 @@ const conversation: ChatMessage[] = [
 ]
 
 const stage = (status: "coberta" | "parcial" | "pendente", evidence: string) => ({ status, evidence })
+const criterion = (status: "cumprido" | "parcial" | "pendente", evidence: string) => ({ status, evidence })
 
 const reply: Pitaco = {
   stages: {
@@ -25,6 +26,12 @@ const reply: Pitaco = {
     problema: stage("parcial", "Carro velho (#3), sem detalhar o impacto."),
     implicacao: stage("pendente", "Não abordada."),
     necessidade: stage("pendente", "Não abordada.")
+  },
+  bant: {
+    budget: criterion("pendente", "Perguntou a parcela (#4), sem falar de orçamento."),
+    authority: criterion("cumprido", "Pessoa física comprando para si."),
+    need: criterion("parcial", "Carro velho para trabalhar (#3)."),
+    timing: criterion("pendente", "Não abordado.")
   },
   stageNow: "problema",
   diagnosis: "O cliente trouxe o uso e um carro velho, mas pediu preço antes de falar do impacto.",
@@ -40,8 +47,9 @@ const reply: Pitaco = {
     }
   ],
   questions: [{ stage: "implicacao", text: "Quantos dias o carro ficou parado este mês?", evidence: [3] }],
-  avoid: ["Mandar a tabela de parcelas antes de entender o uso"],
-  warnings: ["Confirme as condições vigentes antes de falar em valores."]
+  warnings: ["Confirme as condições vigentes antes de falar em valores."],
+  doNow: ["Dizer que vai passar a parcela e entender o uso antes", "Perguntar quanto o carro fica parado"],
+  avoid: ["Mandar a tabela de parcelas antes de entender o uso"]
 }
 
 // `config` lê process.env no import, então cada teste recarrega o módulo com o env desejado.
@@ -76,19 +84,21 @@ beforeEach(() => vi.unstubAllEnvs())
 afterEach(() => vi.unstubAllGlobals())
 
 describe("pitacoSchema", () => {
-  it("as etapas vêm antes da etapa atual e do caminho, e não há campo de mensagem pronta", () => {
+  it("a análise (SPIN, BANT) vem antes, o resumo Fazer / Não fazer por último, e não há mensagem pronta", () => {
     const format = toResponseFormat("pitaco", pitacoSchema, "json_schema")
     if (format.type !== "json_schema") throw new Error("esperava json_schema")
     const properties = format.json_schema.schema.properties as Record<string, unknown>
     expect(Object.keys(properties)).toEqual([
       "stages",
+      "bant",
       "stageNow",
       "diagnosis",
       "path",
       "points",
       "questions",
-      "avoid",
-      "warnings"
+      "warnings",
+      "doNow",
+      "avoid"
     ])
     const json = JSON.stringify(format.json_schema.schema)
     expect(json).not.toMatch(/suggestedText|message"|maxItems|minimum/)
@@ -107,15 +117,17 @@ describe("pitacoSchema", () => {
       points: many(reply.points[0]),
       questions: many(reply.questions[0]),
       avoid: many("x"),
-      warnings: many("x")
+      warnings: many("x"),
+      doNow: many("x")
     })
     expect([
       limited.path.length,
       limited.points.length,
       limited.questions.length,
       limited.avoid.length,
-      limited.warnings.length
-    ]).toEqual([4, 4, 5, 3, 3])
+      limited.warnings.length,
+      limited.doNow.length
+    ]).toEqual([4, 4, 5, 3, 3, 4])
   })
 })
 
@@ -140,6 +152,13 @@ describe("buildPitacoPrompt", () => {
     for (const value of ["situacao", "problema", "implicacao", "necessidade", "abertura"]) {
       expect(TASK_PITACO).toContain(`"${value}"`)
     }
+  })
+
+  it("avalia o BANT e pede o resumo Fazer / Não fazer por último, curto e sem jargão", () => {
+    for (const term of ["budget", "authority", "need", "timing", '"cumprido"']) expect(TASK_PITACO).toContain(term)
+    expect(TASK_PITACO).toContain("## Resumo: Fazer e Não fazer")
+    expect(TASK_PITACO).toContain("sem nomes de método")
+    expect(TASK_PITACO).toMatch(/Nunca coloque "não responder"[\s\S]*em "avoid"/)
   })
 })
 
@@ -183,6 +202,20 @@ describe("sanitizePitaco", () => {
     )
     expect(result.points[0].hint).toBe("")
     expect(result.questions).toEqual([reply.questions[0]])
+  })
+
+  it("descarta tópico do resumo vazio, longo ou com quebra de linha", async () => {
+    const { sanitizePitaco } = await loadService()
+    const result = sanitizePitaco(
+      {
+        ...reply,
+        doNow: ["  Perguntar quanto o carro fica parado  ", "", "z".repeat(161), "Oi Marcos!\nTudo bem?"],
+        avoid: ["   ", reply.avoid[0]]
+      },
+      conversation
+    )
+    expect(result.doNow).toEqual(["Perguntar quanto o carro fica parado"])
+    expect(result.avoid).toEqual(reply.avoid)
   })
 })
 

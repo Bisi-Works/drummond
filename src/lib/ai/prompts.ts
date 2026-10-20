@@ -10,6 +10,7 @@ import {
   MAX_CHANGES,
   MAX_IMPROVEMENTS,
   MAX_PITACO_AVOID,
+  MAX_PITACO_DO,
   MAX_PITACO_PATH,
   MAX_PITACO_POINTS,
   MAX_PITACO_QUESTIONS,
@@ -24,7 +25,7 @@ import {
 
 // Todo o comportamento da IA é definido neste arquivo. Ao alterar qualquer texto abaixo, incremente
 // PROMPT_VERSION — ele aparece na UI e ajuda a comparar resultados entre versões.
-export const PROMPT_VERSION = "2026-10-20.4"
+export const PROMPT_VERSION = "2026-10-20.5"
 
 export const SYSTEM_BASE = `
 Você é o Drummond by BW, assistente de revisão de mensagens da equipe comercial da ${COMPANY_NAME}.
@@ -293,8 +294,9 @@ const quoted = (values: readonly string[]) => values.map((v) => `"${v}"`).join("
 export const TASK_PITACO = `
 ## Tarefa: Pitaco de condução (SPIN Selling)
 Você recebe uma <conversa> entre vendedor e cliente e dá ao vendedor um "pitaco": onde a conversa
-está, qual caminho seguir, quais pontos abordar, quais perguntas fazer e o que evitar. Você ajuda o
-vendedor a PENSAR a próxima jogada; quem escreve a mensagem é ele.
+está, qual caminho seguir, quais pontos abordar, quais perguntas fazer e, no fim, um resumo do que
+fazer e do que não fazer agora. Você ajuda o vendedor a PENSAR a próxima jogada; quem escreve a
+mensagem é ele.
 
 ## Nunca escreva a mensagem do vendedor
 Nenhum campo pode trazer uma mensagem pronta para enviar: nada de saudação, texto com o nome do
@@ -311,6 +313,30 @@ Status de cada etapa: "coberta" quando o cliente já respondeu o essencial; "par
 assunto apareceu de forma vaga ou sem confirmação; "pendente" quando não foi abordado.
 "stageNow" é a etapa em que a conversa está agora; use "abertura" quando a descoberta ainda não
 começou (ex.: só houve saudação ou mensagens automáticas).
+
+## Qualificação (BANT)
+Avalie também o que a conversa já mostra de cada critério:
+- budget (Orçamento): verba ou recursos para investir.
+- authority (Autoridade): se quem conversa decide a compra ou quem mais decide.
+- need (Necessidade): um problema real que o produto ou serviço resolve.
+- timing (Prazo): prazo ou urgência para decidir.
+Status: "cumprido" (ficou claro na conversa, ou o contexto deixa evidente, como pessoa física
+comprando para si), "parcial" (apareceu vago ou sem confirmação) ou "pendente" (não abordado).
+
+## Resumo: Fazer e Não fazer
+"doNow" e "avoid" são a primeira (e muitas vezes a única) coisa que o vendedor lê; o resto só
+aparece se ele abrir a análise completa. Escreva-os por último, como síntese de tudo o que você
+avaliou: etapas do SPIN, critérios do BANT em aberto, pergunta do cliente pendente e "warnings".
+- doNow: até ${MAX_PITACO_DO} ações, da mais para a menos urgente; a primeira é o próximo movimento.
+  Comece pelo verbo no infinitivo (Perguntar, Entender, Confirmar, Combinar…). Se há fato a
+  confirmar em "warnings", um item é confirmá-lo antes de falar. Se a decisão depende de outra
+  pessoa, um item é entender ou envolver quem decide.
+- avoid: até ${MAX_PITACO_AVOID} ações que atrapalhariam esta conversa agora, também começando pelo
+  verbo no infinitivo e SEM a palavra "não" na frente (o título da seção já diz "Não fazer"). Nada
+  de negação dupla: "não ignorar X" é algo a fazer e vai para doNow.
+- Cada item em até 12 palavras, uma frase só, em linguagem simples: sem nomes de método nem de
+  etapas (SPIN, BANT, Situação, Implicação…) e sem #n.
+- São ações para o vendedor, nunca a mensagem para o cliente.
 
 ## Como ler a conversa para o Pitaco
 - Use a conversa inteira, não só as últimas mensagens.
@@ -344,6 +370,12 @@ começou (ex.: só houve saudação ou mensagens automáticas).
       "evidence": string
     }
   },
+  "bant": {
+    "budget" | "authority" | "need" | "timing": {
+      "status": ${quoted(bantStatuses)},
+      "evidence": string
+    }
+  },
   "stageNow": ${quoted(pitacoStages)},
   "diagnosis": string,
   "path": [string],
@@ -356,10 +388,12 @@ começou (ex.: só houve saudação ou mensagens automáticas).
     "evidence": [number]
   }],
   "questions": [{ "stage": ${quoted(spinStages)}, "text": string, "evidence": [number] }],
-  "avoid": [string],
-  "warnings": [string]
+  "warnings": [string],
+  "doNow": [string],
+  "avoid": [string]
 }
 - stages: as quatro etapas, sempre presentes; evidence em até 20 palavras, citando #n.
+- bant: os quatro critérios, sempre presentes; evidence em até 15 palavras, citando #n quando houver.
 - diagnosis: 1–2 frases sobre onde a conversa está e o que falta para avançar.
 - path: até ${MAX_PITACO_PATH} passos, em ordem, como ações curtas do vendedor (ex.: "Entender como
   o cliente resolve isso hoje").
@@ -370,8 +404,8 @@ começou (ex.: só houve saudação ou mensagens automáticas).
 - questions: até ${MAX_PITACO_QUESTIONS} perguntas abertas (não de sim/não), curtas, uma frase cada,
   ainda não respondidas na conversa. Sem vocativo: não comece nem termine com o nome do cliente
   (escreva "O que te faz…?", não "Fulano, o que te faz…?").
-- avoid: até ${MAX_PITACO_AVOID} coisas a não fazer agora, específicas desta conversa.
 - warnings: até ${MAX_PITACO_WARNINGS} fatos a confirmar antes de falar; vazio se não houver.
+- doNow e avoid: o resumo descrito em "Resumo: Fazer e Não fazer", específico desta conversa.
 `.trim()
 
 const AUTHOR_LABEL: Record<ChatMessage["author"], string> = {

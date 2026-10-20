@@ -15,7 +15,34 @@ tem **Atualizar Pitaco**.
 - **Widget do dia:** o drawer (z-60) fica por cima do widget (z-50), sem mexer na posição nem no
   "minimizado" salvos pelo vendedor.
 - **Cabeçalho:** retrato + "Pitaco · SPIN" + nome do contato. O "Drummond by BW" quebrava no drawer
-  de 320 px.
+  de 320 px. *(Mudou na visão simples, abaixo: "Pitaco" e, no modo avançado, "Pitaco · Avançado".)*
+
+## Visão simples e modo Avançado (20/10/2026)
+
+O drawer completo tinha conteúdo demais para ler antes de responder. Agora ele **abre sempre** numa
+visão simples com duas caixas: verde **Fazer** (até 4 tópicos; o primeiro é o próximo movimento) e
+vermelha **Não fazer** (até 3). O botão **Avançado** no cabeçalho alterna para a análise completa
+(SPIN, BANT, diagnóstico, caminho, pontos, perguntas copiáveis e "Confirme antes de falar") e vira
+**Simples** para voltar. "Atualizar" mantém o modo escolhido; fechar e reabrir volta ao simples.
+
+- **Mesma chamada:** o schema ganhou `bant` (status + evidência, sem pergunta pronta) logo depois de
+  `stages`, e `doNow` + `avoid` no fim. O resumo é gerado por último, como síntese do SPIN, do BANT,
+  da pergunta pendente do cliente e dos `warnings`. "Evite agora" deixou o modo avançado: virou o
+  "Não fazer".
+- **Prompt 2026-10-20.5:** tópicos começam pelo verbo, até 12 palavras, sem jargão de método, sem
+  `#n` e sem mensagem pronta; o "Não fazer" vem sem o "não" na frente e sem negação dupla ("não
+  ignorar X" é Fazer). O nome do cliente em terceira pessoa ("Responder à saudação da Carla") é
+  permitido: é instrução, não mensagem.
+- **Service:** descarta tópico vazio, com mais de 160 caracteres ou com quebra de linha. Se o Fazer
+  ficar vazio, o drawer mostra o caminho no lugar.
+- **`pnpm bench:pitaco`** (4 casos × 5): preço no meio da descoberta, só saudação, decisão de outra
+  pessoa (BANT) e objeção de preço. Com o prompt .5: 20/20. Antes da regra "sem o não", todos os
+  itens de evitar começavam com "Não…" e alguns eram "Não ignorar…". Tempo: mediana 5,6 s antes →
+  6,5 s depois, na mesma janela (~+1 s pelos campos novos); o provedor oscilou entre 7 e 28 s em
+  outras rodadas.
+- **No app real (Sergio Alves, 2 áudios):** visão simples em 4,6 s (~US$ 0,001, 1.215 tokens de
+  saída); Avançado mostra SPIN e BANT clicáveis; Atualizar mantém o modo; Esc + reabrir volta ao
+  simples sem nova geração. `check:bundle` 54/54 na produção e 53/53 no dev; 472 testes.
 
 ## Tasks
 

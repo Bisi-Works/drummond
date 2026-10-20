@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react"
 
 import type { PitacoState } from "~hooks/usePitaco"
-import { spinStages, type SpinStage } from "~lib/ai/constants"
+import { bantCriteria, spinStages, type SpinStage } from "~lib/ai/constants"
 import type { Pitaco } from "~lib/ai/schemas"
-import { PITACO_KIND_LABEL, SPIN_LABEL, SPIN_STATUS_STYLE } from "~lib/labels"
+import { BANT_LABEL, BANT_STATUS_STYLE, PITACO_KIND_LABEL, SPIN_LABEL, SPIN_STATUS_STYLE } from "~lib/labels"
 import { describeAudio } from "~lib/transcripts/prepare"
 
 import { LogoMark } from "./Brand"
@@ -74,33 +74,49 @@ const CopyQuestion = ({ text }: { text: string }) => {
   )
 }
 
-const Stepper = ({ pitaco }: { pitaco: Pitaco }) => {
-  const current = pitaco.stageNow === "abertura" ? null : pitaco.stageNow
-  // A evidência da etapa atual já aparece aberta; clicar noutra etapa troca, clicar de novo fecha.
-  const [selected, setSelected] = useState<SpinStage | null>(current)
-  const evidence = selected ? pitaco.stages[selected].evidence.trim() : ""
+interface GridItem {
+  key: string
+  letter: string
+  label: string
+  status: { label: string; icon: string; iconClassName: string }
+  evidence: string
+}
+
+/**
+ * Quatro casas com status (etapas do SPIN, critérios do BANT). A evidência da casa inicial já
+ * aparece aberta; clicar noutra troca, clicar de novo fecha.
+ */
+const StatusGrid = ({
+  label,
+  items,
+  current,
+  initial = null
+}: {
+  label: string
+  items: GridItem[]
+  /** Casa em destaque (a etapa atual do SPIN). */
+  current?: string | null
+  initial?: string | null
+}) => {
+  const [selected, setSelected] = useState<string | null>(initial)
+  const open = items.find((item) => item.key === selected && item.evidence.trim())
 
   return (
     <div className="space-y-2">
-      {pitaco.stageNow === "abertura" && (
-        <p className="text-xs font-medium text-fg-muted">Abertura: a descoberta ainda não começou.</p>
-      )}
-      <ol className="grid grid-cols-4 gap-1.5" aria-label="Etapas do SPIN">
-        {spinStages.map((stage) => {
-          const status = SPIN_STATUS_STYLE[pitaco.stages[stage].status]
-          const { letter, label } = SPIN_LABEL[stage]
-          const isCurrent = stage === current
+      <ol className="grid grid-cols-4 gap-1.5" aria-label={label}>
+        {items.map(({ key, letter, label, status }) => {
+          const isCurrent = key === current
           return (
-            <li key={stage}>
+            <li key={key}>
               <button
                 type="button"
-                onClick={() => setSelected(selected === stage ? null : stage)}
-                aria-pressed={selected === stage}
+                onClick={() => setSelected(selected === key ? null : key)}
+                aria-pressed={selected === key}
                 aria-current={isCurrent ? "step" : undefined}
                 title={`${label}: ${status.label}${isCurrent ? " (etapa atual)" : ""}`}
                 className={`flex w-full flex-col items-center gap-0.5 rounded-lg border px-1 py-1.5 transition hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-brand ${
                   isCurrent ? "border-brand ring-1 ring-brand" : "border-line"
-                } ${selected === stage ? "bg-muted" : ""}`}>
+                } ${selected === key ? "bg-muted" : ""}`}>
                 <span className="flex items-center gap-1 text-sm font-semibold text-fg">
                   {letter}
                   <span className={`text-xs ${status.iconClassName}`} aria-hidden="true">
@@ -113,18 +129,110 @@ const Stepper = ({ pitaco }: { pitaco: Pitaco }) => {
           )
         })}
       </ol>
-      {selected && evidence && (
+      {open && (
         <p className="border-l-2 border-line-strong pl-2 text-xs text-fg-muted">
-          <span className="font-medium text-fg">{SPIN_LABEL[selected].label}:</span> {evidence}
+          <span className="font-medium text-fg">{open.label}:</span> {open.evidence.trim()}
         </p>
       )}
     </div>
   )
 }
 
-const PitacoBody = ({ pitaco }: { pitaco: Pitaco }) => (
+const SpinGrid = ({ pitaco }: { pitaco: Pitaco }) => {
+  const current = pitaco.stageNow === "abertura" ? null : pitaco.stageNow
+  return (
+    <Section title="SPIN">
+      {pitaco.stageNow === "abertura" && (
+        <p className="text-xs font-medium text-fg-muted">Abertura: a descoberta ainda não começou.</p>
+      )}
+      <StatusGrid
+        label="Etapas do SPIN"
+        current={current}
+        initial={current}
+        items={spinStages.map((stage: SpinStage) => ({
+          key: stage,
+          ...SPIN_LABEL[stage],
+          status: SPIN_STATUS_STYLE[pitaco.stages[stage].status],
+          evidence: pitaco.stages[stage].evidence
+        }))}
+      />
+    </Section>
+  )
+}
+
+const BantGrid = ({ pitaco }: { pitaco: Pitaco }) => {
+  const done = bantCriteria.filter((criterion) => pitaco.bant[criterion].status === "cumprido").length
+  return (
+    <Section title={`Qualificação (BANT) · ${done}/${bantCriteria.length}`}>
+      <StatusGrid
+        label="Critérios do BANT"
+        items={bantCriteria.map((criterion) => ({
+          key: criterion,
+          ...BANT_LABEL[criterion],
+          status: BANT_STATUS_STYLE[pitaco.bant[criterion].status],
+          evidence: pitaco.bant[criterion].evidence
+        }))}
+      />
+    </Section>
+  )
+}
+
+const TOPIC_TONE = {
+  fazer: {
+    box: "border-emerald-200 bg-emerald-50 dark:border-emerald-400/30 dark:bg-emerald-400/10",
+    title: "text-emerald-800 dark:text-emerald-300",
+    mark: "text-emerald-600 dark:text-emerald-400",
+    icon: "✓"
+  },
+  naoFazer: {
+    box: "border-rose-200 bg-rose-50 dark:border-rose-400/30 dark:bg-rose-400/10",
+    title: "text-rose-800 dark:text-rose-300",
+    mark: "text-rose-600 dark:text-rose-400",
+    icon: "✕"
+  }
+} as const
+
+const Topics = ({ tone, title, items }: { tone: keyof typeof TOPIC_TONE; title: string; items: string[] }) => {
+  const style = TOPIC_TONE[tone]
+  return (
+    <section className={`rounded-lg border px-3 py-3 ${style.box}`} aria-label={title}>
+      <h3 className={`mb-2 flex items-center gap-1.5 text-sm font-semibold ${style.title}`}>
+        <span aria-hidden="true">{style.icon}</span>
+        {title}
+      </h3>
+      <ul className="space-y-2">
+        {items.map((item, i) => (
+          <li key={i} className="flex gap-2 text-sm leading-snug text-fg">
+            <span className={`w-3 shrink-0 text-center ${style.mark}`} aria-hidden="true">
+              •
+            </span>
+            {item}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+/**
+ * Visão inicial: só o que fazer e o que não fazer agora. O modelo escreve esse resumo por último,
+ * depois de passar pelo SPIN, pelo BANT e pelos fatos a confirmar, que ficam no modo Avançado.
+ * Se o resumo vier vazio (o service descarta tópico longo demais), o caminho faz as vezes do Fazer.
+ */
+const SimpleBody = ({ pitaco }: { pitaco: Pitaco }) => {
+  const doNow = pitaco.doNow.length > 0 ? pitaco.doNow : pitaco.path
+  return (
+    <>
+      {doNow.length > 0 && <Topics tone="fazer" title="Fazer" items={doNow} />}
+      {pitaco.avoid.length > 0 && <Topics tone="naoFazer" title="Não fazer" items={pitaco.avoid} />}
+    </>
+  )
+}
+
+const AdvancedBody = ({ pitaco }: { pitaco: Pitaco }) => (
   <>
-    <Stepper pitaco={pitaco} />
+    <SpinGrid pitaco={pitaco} />
+    <BantGrid pitaco={pitaco} />
 
     <p className="text-sm leading-relaxed text-fg">{pitaco.diagnosis}</p>
 
@@ -180,21 +288,6 @@ const PitacoBody = ({ pitaco }: { pitaco: Pitaco }) => (
       </Section>
     )}
 
-    {pitaco.avoid.length > 0 && (
-      <Section title="Evite agora">
-        <ul className="space-y-1">
-          {pitaco.avoid.map((item, i) => (
-            <li key={i} className="flex gap-2 text-sm text-fg">
-              <span className="w-4 shrink-0 text-center text-rose-600 dark:text-rose-400" aria-hidden="true">
-                ✕
-              </span>
-              {item}
-            </li>
-          ))}
-        </ul>
-      </Section>
-    )}
-
     {pitaco.warnings.length > 0 && (
       <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-400/30 dark:bg-amber-400/10">
         <p className="mb-1 text-xs font-semibold text-amber-900 dark:text-amber-200">Confirme antes de falar</p>
@@ -228,6 +321,9 @@ export const PitacoDrawer = ({ state, contactName, onRefresh, onClose }: Props) 
   const panel = useRef<HTMLElement>(null)
   const busy = state.kind === "reading" || state.kind === "transcribing" || state.kind === "generating"
   const progress = progressText(state)
+  // Abre sempre na visão simples (o drawer é desmontado ao fechar); "Atualizar" mantém a escolha.
+  const [advanced, setAdvanced] = useState(false)
+  const hasView = busy || (state.kind === "done" && state.response.ok)
 
   // O drawer recebe o foco ao abrir, para o leitor de tela anunciar e o Esc funcionar de imediato.
   useEffect(() => panel.current?.focus(), [])
@@ -246,18 +342,30 @@ export const PitacoDrawer = ({ state, contactName, onRefresh, onClose }: Props) 
           <LogoMark className="h-[30px] w-5 shrink-0" />
           <div className="min-w-0 leading-tight">
             <h2 id="pitaco-title" className="text-[15px] font-semibold tracking-tight">
-              Pitaco <span className="font-normal text-gray-400">· SPIN</span>
+              Pitaco
+              {advanced && <span className="font-normal text-gray-400"> · Avançado</span>}
             </h2>
             {contactName && <p className="truncate text-[11px] text-gray-400">{contactName}</p>}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Fechar o Pitaco"
-          className="rounded p-1.5 leading-none text-gray-400 hover:bg-white/10 hover:text-white">
-          ✕
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {hasView && (
+            <button
+              type="button"
+              onClick={() => setAdvanced(!advanced)}
+              title={advanced ? "Voltar ao resumo: o que fazer e o que não fazer" : "Ver a análise completa: SPIN, BANT, caminho e perguntas"}
+              className="rounded-md border border-white/25 px-2 py-1 text-[11px] font-medium text-gray-200 hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
+              {advanced ? "Simples" : "Avançado"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Fechar o Pitaco"
+            className="rounded p-1.5 leading-none text-gray-400 hover:bg-white/10 hover:text-white">
+            ✕
+          </button>
+        </div>
       </header>
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
@@ -266,17 +374,23 @@ export const PitacoDrawer = ({ state, contactName, onRefresh, onClose }: Props) 
           {progress ?? (state.kind === "done" ? "Pitaco pronto." : "")}
         </p>
 
-        {busy && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-4 gap-1.5" aria-hidden="true">
-              {spinStages.map((stage) => (
-                <div key={stage} className="h-11 animate-pulse rounded-lg bg-muted" />
-              ))}
+        {busy &&
+          (advanced ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-4 gap-1.5" aria-hidden="true">
+                {spinStages.map((stage) => (
+                  <div key={stage} className="h-11 animate-pulse rounded-lg bg-muted" />
+                ))}
+              </div>
+              <Skeleton lines={2} />
+              <Skeleton lines={3} />
             </div>
-            <Skeleton lines={2} />
-            <Skeleton lines={3} />
-          </div>
-        )}
+          ) : (
+            <div className="space-y-4" aria-hidden="true">
+              <div className="h-32 animate-pulse rounded-lg bg-muted" />
+              <div className="h-24 animate-pulse rounded-lg bg-muted" />
+            </div>
+          ))}
 
         {state.kind === "idle" && (
           <div className="space-y-3 py-6 text-center">
@@ -296,8 +410,12 @@ export const PitacoDrawer = ({ state, contactName, onRefresh, onClose }: Props) 
 
         {state.kind === "done" &&
           (state.response.ok ? (
-            // `key`: um Pitaco novo reabre o stepper na etapa atual dele.
-            <PitacoBody key={state.at} pitaco={state.response.data} />
+            advanced ? (
+              // `key`: um Pitaco novo reabre o stepper na etapa atual dele.
+              <AdvancedBody key={state.at} pitaco={state.response.data} />
+            ) : (
+              <SimpleBody pitaco={state.response.data} />
+            )
           ) : (
             <p role="alert" className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:bg-rose-500/15 dark:text-rose-200">
               {state.response.error}

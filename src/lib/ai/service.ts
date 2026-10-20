@@ -5,7 +5,7 @@ import type { DailyReportInput } from "~lib/tracking/report"
 import { estimateCost, estimateTokens, pricingRange, type CostEstimate, type CostInfo } from "./cost"
 import { chatCompletion, fetchModelEndpoints, OpenRouterError } from "./openrouter"
 import { parseModelJson } from "./parse"
-import { MAX_PITACO_HINT_CHARS, MAX_PITACO_QUESTION_CHARS } from "./constants"
+import { MAX_PITACO_HINT_CHARS, MAX_PITACO_QUESTION_CHARS, MAX_PITACO_TOPIC_CHARS } from "./constants"
 import {
   buildCoachPrompt,
   buildDailyReportPrompt,
@@ -179,7 +179,8 @@ export const dropInvalidImprovements = (
  * Mantém o Pitaco ancorado na conversa e longe de mensagem pronta: tira de `evidence` os números
  * que não existem; descarta o ponto ou a pergunta que só citava mensagens inexistentes (o modelo
  * inventou a base); descarta perguntas longas ou com quebra de linha (viraram texto para enviar) e
- * esvazia a dica nas mesmas condições. Depois limita as listas.
+ * esvazia a dica nas mesmas condições; no resumo Fazer / Não fazer, descarta o tópico vazio, longo ou
+ * com quebra de linha. Depois limita as listas.
  */
 export const sanitizePitaco = (pitaco: Pitaco, conversation: ChatMessage[]): Pitaco => {
   const ids = new Set(conversation.map((m) => m.id))
@@ -188,6 +189,8 @@ export const sanitizePitaco = (pitaco: Pitaco, conversation: ChatMessage[]): Pit
     return item.evidence.length > 0 && evidence.length === 0 ? null : { ...item, evidence }
   }
   const short = (text: string, max: number) => !/\n/.test(text.trim()) && text.trim().length <= max
+  const topics = (items: string[]) =>
+    items.map((item) => item.trim()).filter((item) => item && short(item, MAX_PITACO_TOPIC_CHARS))
 
   return limitPitaco({
     ...pitaco,
@@ -198,7 +201,9 @@ export const sanitizePitaco = (pitaco: Pitaco, conversation: ChatMessage[]): Pit
     questions: pitaco.questions
       .map(anchored)
       .filter((question) => question !== null)
-      .filter((question) => question.text.trim() && short(question.text, MAX_PITACO_QUESTION_CHARS))
+      .filter((question) => question.text.trim() && short(question.text, MAX_PITACO_QUESTION_CHARS)),
+    doNow: topics(pitaco.doNow),
+    avoid: topics(pitaco.avoid)
   })
 }
 
