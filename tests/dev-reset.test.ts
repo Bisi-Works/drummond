@@ -25,7 +25,7 @@ afterEach(() => {
 })
 
 describe("clearSavedData", () => {
-  it("apaga dias, relatórios e a trava, e preserva posição do widget e tema", async () => {
+  it("apaga dias, relatórios e a trava, e preserva o tema", async () => {
     const data = installChrome({
       "drummond.dayLog.2026-10-07": { date: "2026-10-07" },
       "drummond.dayLog.2026-10-08": { date: "2026-10-08" },
@@ -37,8 +37,8 @@ describe("clearSavedData", () => {
       "outra.extensao": 1
     })
 
-    expect(await clearSavedData()).toBe(5)
-    expect([...data.keys()].sort()).toEqual(["drummond.widgetPosition", "outra.extensao", "theme"])
+    expect(await clearSavedData()).toBe(6)
+    expect([...data.keys()].sort()).toEqual(["outra.extensao", "theme"])
   })
 
   it("devolve 0 quando não há nada para apagar", async () => {

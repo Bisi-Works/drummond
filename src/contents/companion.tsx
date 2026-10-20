@@ -6,17 +6,23 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { getAdapter } from "~adapters"
 import type { ReviewDraftRequest, ReviewDraftResponse } from "~background/messages/review-draft"
 import { GlassesMark } from "~components/Brand"
-import { DayWidget } from "~components/DayWidget"
+import { InboxBar } from "~components/InboxBar"
+import { PitacoDrawer, PitacoMark } from "~components/PitacoDrawer"
 import { Spinner } from "~components/Spinner"
 import { SuggestionCard, type ReviewState } from "~components/SuggestionCard"
 import { useComposerState, type Box } from "~hooks/useComposerState"
+import { useHeaderSlot } from "~hooks/useHeaderSlot"
+import { usePitaco } from "~hooks/usePitaco"
 import { useTheme } from "~hooks/useTheme"
 import { PROMPT_VERSION } from "~lib/ai/prompts"
 import { registerBrandFont } from "~lib/brand-font"
 import { config as appConfig } from "~lib/config"
+import { shouldPushPage } from "~lib/layout"
 import { GET_CONVERSATION, type GetConversationResponse } from "~lib/messages"
 import { reviewSignal } from "~lib/tracking/signals"
 import { recordReview } from "~lib/tracking/store"
+import { prepareConversation } from "~lib/transcripts/ensure"
+import { audioSummary, type AudioSummary } from "~lib/transcripts/prepare"
 
 // Precisa listar os mesmos domínios que os `hosts` dos adapters (o Plasmo lê este objeto estaticamente).
 export const config: PlasmoCSConfig = {
@@ -33,15 +39,28 @@ export const getStyle: PlasmoGetStyle = () => {
 const adapter = getAdapter(location.hostname)
 if (adapter) registerBrandFont()
 
-// Responde ao side panel com a conversa aberta. Listener síncrono: só responde ao próprio nome.
+// Responde ao side panel com a conversa aberta, já com as transcrições: o coaching usa o mesmo cache
+// do Revisar e do Pitaco (um áudio só é transcrito uma vez). Se a preparação falhar, a conversa vai
+// sem transcrição, com o marcador `[áudio]`. Só responde ao próprio nome; `true` mantém o canal
+// aberto até a resposta assíncrona.
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.name !== GET_CONVERSATION || !adapter) return
-  const response: GetConversationResponse = {
-    platform: adapter.id,
-    conversationKey: adapter.getConversationKey(),
-    conversation: adapter.readConversation(appConfig.coachMessages)
-  }
-  sendResponse(response)
+  const conversationKey = adapter.getConversationKey()
+  const raw = adapter.readConversation(appConfig.coachMessages)
+  const reply = (conversation: typeof raw) =>
+    sendResponse({
+      platform: adapter.id,
+      conversationKey,
+      conversation,
+      audio: audioSummary(conversation)
+    } satisfies GetConversationResponse)
+
+  if (!conversationKey) return void reply(raw)
+  prepareConversation(adapter, raw, conversationKey).then(
+    (prepared) => reply(prepared.conversation),
+    () => reply(raw)
+  )
+  return true
 })
 
 const CARD_MAX_WIDTH = 440
@@ -49,6 +68,27 @@ const CARD_MIN_WIDTH = 320
 const CARD_GAP = 8
 const BUTTON_HEIGHT = 28
 const BUTTON_GAP = 8
+/**
+ * Drawer do Pitaco: preso à direita, na altura inteira. Quando o chat ainda cabe ao lado dele
+ * (`shouldPushPage`), empurra a página com a largura cheia e não cobre nada. Senão, sobrepõe: ocupa o
+ * espaço à direita do campo de texto (o painel "Perfil" do Botconversa) para não cobrir o botão de
+ * enviar, entre o mínimo e o máximo abaixo. Nunca passa da tela menos a margem.
+ */
+const DRAWER_WIDTH = 400
+const DRAWER_MIN_WIDTH = 320
+const DRAWER_GAP = 8
+const DRAWER_MARGIN = 32
+
+const pushedDrawerWidth = () => Math.min(DRAWER_WIDTH, window.innerWidth - DRAWER_MARGIN)
+
+const drawerWidth = (frame: Box | null) => {
+  const room = frame ? window.innerWidth - frame.right - DRAWER_GAP : DRAWER_WIDTH
+  const width = Math.min(DRAWER_WIDTH, Math.max(DRAWER_MIN_WIDTH, room))
+  return Math.min(width, window.innerWidth - DRAWER_MARGIN)
+}
+
+const pillBase =
+  "flex items-center gap-1.5 rounded-full border pl-2.5 pr-3 text-xs font-medium shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
 
 // Na barra do campo, logo à direita da âncora (espaço livre); sem âncora, flutua acima do campo.
 const buttonPosition = (frame: Box, anchor: Box | null) =>
@@ -67,6 +107,7 @@ const failure = (error: string): ReviewDraftResponse => ({
 
 const Companion = () => {
   const { composer, frame, buttonAnchor, draft, conversationKey } = useComposerState(adapter)
+  const headerSlot = useHeaderSlot(adapter)
   // Só lê: o tema é trocado no painel lateral e chega aqui pelo chrome.storage.
   const { theme } = useTheme()
   const [review, setReview] = useState<ReviewState>({ kind: "idle" })
@@ -74,6 +115,7 @@ const Companion = () => {
   const [applyError, setApplyError] = useState<string | null>(null)
   // Descarta respostas que chegam depois de trocar de conversa ou de uma nova revisão.
   const requestId = useRef(0)
+  const pitaco = usePitaco(adapter, conversationKey)
 
   useEffect(() => {
     requestId.current++
@@ -86,17 +128,48 @@ const Companion = () => {
     setApplyError(null)
   }, [])
 
+  // Esc fecha o que estiver aberto (o card do Revisar e o drawer do Pitaco nunca abrem juntos).
+  // Clicar fora não fecha o drawer: o vendedor consulta o Pitaco enquanto escreve no campo.
+  const closePitaco = pitaco.close
   useEffect(() => {
-    if (review.kind === "idle") return
-    const onKeyDown = (event: KeyboardEvent) => event.key === "Escape" && dismiss()
+    if (review.kind === "idle" && !pitaco.isOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      dismiss()
+      closePitaco()
+    }
     document.addEventListener("keydown", onKeyDown, true)
     return () => document.removeEventListener("keydown", onKeyDown, true)
-  }, [review.kind, dismiss])
+  }, [review.kind, pitaco.isOpen, dismiss, closePitaco])
+
+  // Empurrar ou sobrepor: decide pela largura do chat (o campo de texto) e reavalia quando ela muda,
+  // inclusive pelo próprio empurrão. Sem campo na tela (a página remonta o chat ao trocar de
+  // conversa) mantém a decisão, para não piscar. Fechar o drawer devolve o espaço à página.
+  const chatWidth = composer && frame ? frame.width : null
+  const [pushed, setPushed] = useState(false)
+  useEffect(() => {
+    if (!pitaco.isOpen) return setPushed(false)
+    if (chatWidth === null) return
+    setPushed((was) => shouldPushPage(chatWidth, was, pushedDrawerWidth()))
+  }, [pitaco.isOpen, chatWidth])
+
+  useEffect(() => {
+    if (!pushed || !adapter?.setRightInset) return
+    adapter.setRightInset(pushedDrawerWidth())
+    return () => adapter.setRightInset?.(0)
+  }, [pushed])
+
+  const togglePitaco = () => {
+    if (pitaco.isOpen) return pitaco.close()
+    dismiss()
+    pitaco.open()
+  }
 
   const runReview = async () => {
     if (!adapter) return
     const text = adapter.readDraft()
     if (!text.trim()) return
+    pitaco.close()
 
     // Conversa da revisão no momento do clique: se o vendedor trocar de conversa antes da
     // resposta, o sinal ainda é anexado à conversa certa.
@@ -105,16 +178,25 @@ const Companion = () => {
     setReview({ kind: "loading" })
     setApplyError(null)
     let response: ReviewDraftResponse
+    let audio: AudioSummary | undefined
     try {
+      // A revisão também enxerga o conteúdo dos áudios: o cache por mensagem evita transcrever o
+      // mesmo áudio de novo em cada clique.
+      const rawConversation = adapter.readConversation(appConfig.contextMessages)
+      const prepared = key ? await prepareConversation(adapter, rawConversation, key) : null
+      if (id !== requestId.current) return
+      const conversation = prepared?.conversation ?? rawConversation
+      // Só o recorte que a revisão de fato manda ao modelo (ver `buildReviewPrompt`).
+      audio = audioSummary(conversation.slice(-appConfig.contextMessages))
       response = await sendToBackground<ReviewDraftRequest, ReviewDraftResponse>({
         name: "review-draft",
-        body: { conversation: adapter.readConversation(appConfig.contextMessages), draft: text }
+        body: { conversation, draft: text }
       })
     } catch {
       // Acontece quando a extensão é recarregada com a página aberta.
       response = failure("A extensão foi atualizada. Recarregue a página do Botconversa.")
     }
-    if (id === requestId.current) setReview({ kind: "done", draft: text, response })
+    if (id === requestId.current) setReview({ kind: "done", draft: text, response, audio })
     // A revisão já foi feita: só se anexa o que a extensão já produziu, sem chamada de IA nova.
     if (response.ok && key) void recordReview(key, reviewSignal(response.data, Date.now()))
   }
@@ -132,7 +214,7 @@ const Companion = () => {
     setTimeout(() => setCopied(false), 1500)
   }
 
-  // Só o adapter é indispensável: o widget do dia existe mesmo sem conversa aberta (o campo de
+  // Só o adapter é indispensável: a barra do dia existe mesmo sem conversa aberta (o campo de
   // texto pode não estar montado). O botão "Revisar" e o card continuam presos ao campo.
   if (!adapter) return null
 
@@ -144,28 +226,42 @@ const Companion = () => {
 
   return (
     <div className={theme === "dark" ? "dark font-sans" : "font-sans"}>
-      <DayWidget adapter={adapter} />
+      <InboxBar adapter={adapter} slot={headerSlot} activeKey={conversationKey} />
 
       {composerFrame && (
         <>
-          <button
-            type="button"
-            onClick={review.kind === "idle" ? runReview : dismiss}
-            disabled={!hasDraft && review.kind === "idle"}
-            title={hasDraft ? "Revisar a mensagem com IA" : "Digite uma mensagem para revisar"}
+          <div
             style={{
               position: "fixed",
               height: BUTTON_HEIGHT,
               ...buttonPosition(composerFrame, buttonAnchor)
             }}
-            className="flex items-center gap-1.5 rounded-full border border-black bg-black pl-2.5 pr-3 text-xs font-medium text-white shadow-sm transition hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-white disabled:text-gray-400 disabled:shadow-none">
-            {review.kind === "loading" ? (
-              <Spinner className="h-3.5 w-3.5" />
-            ) : (
-              <GlassesMark className="h-[11px] w-[18px]" />
-            )}
-            {copied ? "Copiado ✓" : review.kind === "idle" ? "Revisar" : "Fechar"}
-          </button>
+            className="flex items-stretch gap-1.5">
+            <button
+              type="button"
+              onClick={review.kind === "idle" ? runReview : dismiss}
+              disabled={!hasDraft && review.kind === "idle"}
+              title={hasDraft ? "Revisar a mensagem com IA" : "Digite uma mensagem para revisar"}
+              className={`${pillBase} border-black bg-black text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-white disabled:text-gray-400 disabled:shadow-none`}>
+              {review.kind === "loading" ? (
+                <Spinner className="h-3.5 w-3.5" />
+              ) : (
+                <GlassesMark className="h-[11px] w-[18px]" />
+              )}
+              {copied ? "Copiado ✓" : review.kind === "idle" ? "Revisar" : "Fechar"}
+            </button>
+            <button
+              type="button"
+              onClick={togglePitaco}
+              aria-pressed={pitaco.isOpen}
+              title={pitaco.isOpen ? "Fechar o Pitaco" : "Pitaco: por onde seguir a conversa (SPIN)"}
+              className={`${pillBase} border-black ${
+                pitaco.isOpen ? "bg-black text-white hover:bg-gray-800" : "bg-white text-black hover:bg-gray-100"
+              }`}>
+              <PitacoMark />
+              Pitaco
+            </button>
+          </div>
 
           {review.kind !== "idle" && (
             <div
@@ -187,6 +283,26 @@ const Companion = () => {
             </div>
           )}
         </>
+      )}
+
+      {/* Acima da barra do dia (z-50): quando sobrepõe a página, o drawer cobre o fim da barra. */}
+      {pitaco.isOpen && (
+        <div
+          className="z-[60]"
+          style={{
+            position: "fixed",
+            top: 0,
+            right: 0,
+            bottom: 0,
+            width: pushed ? pushedDrawerWidth() : drawerWidth(composerFrame || null)
+          }}>
+          <PitacoDrawer
+            state={pitaco.state}
+            contactName={adapter.getContactName?.()}
+            onRefresh={pitaco.refresh}
+            onClose={pitaco.close}
+          />
+        </div>
       )}
     </div>
   )

@@ -93,6 +93,30 @@ const fakeModel = {
     },
     nextStep: "Enviar proposta."
   },
+  // Pitaco da rota "generate-pitaco": cita a mensagem #1 (existe) e a #9 (não existe, sai no service).
+  pitaco: {
+    stages: {
+      situacao: { status: "parcial", evidence: "Cliente só cumprimentou (#1)." },
+      problema: { status: "pendente", evidence: "Não abordado." },
+      implicacao: { status: "pendente", evidence: "Não abordada." },
+      necessidade: { status: "pendente", evidence: "Não abordada." }
+    },
+    bant: {
+      budget: { status: "pendente", evidence: "Não abordado." },
+      authority: { status: "pendente", evidence: "Não abordado." },
+      need: { status: "parcial", evidence: "Só cumprimentou (#1)." },
+      timing: { status: "pendente", evidence: "Não abordado." }
+    },
+    stageNow: "situacao",
+    diagnosis: "Conversa no início, sem descoberta.",
+    path: ["Entender o que o cliente procura"],
+    points: [{ stage: "situacao", kind: "descobrir", title: "O que motivou o contato", why: "Só houve saudação (#1).", hint: "Entender o objetivo.", evidence: [1, 9] }],
+    questions: [{ stage: "situacao", text: "O que fez você procurar a gente agora?", evidence: [1] }],
+    warnings: [],
+    doNow: ["Tente entender o que motivou o contato, porque ele só cumprimentou até agora."],
+    avoid: ["Evite falar de preço antes de entender o objetivo dele."],
+    replies: ["Que bom falar com você! O que te fez procurar a gente agora?"]
+  },
   // Relatório diário da rota "generate-report" (e do botão "Encerrar o dia" no widget).
   daily: {
     resumo: "Dia produtivo, com uma pendência.",
@@ -120,6 +144,7 @@ const dailyInput = {
 const requests = []
 const priceLookups = []
 const decisionRequests = []
+const sttRequests = []
 const fetchStub = async (url, init) => {
   // Decisions API (Jev): responde como o OpenRouter, com as probabilidades da pergunta única.
   if (url.endsWith("/api/alpha/decisions")) {
@@ -140,11 +165,22 @@ const fetchStub = async (url, init) => {
     return new Response(JSON.stringify({ data: { endpoints: [endpoint] } }))
   }
   const body = JSON.parse(init.body)
+  // Transcrição (Whisper): endpoint próprio, com `text` e `usage` no formato de áudio.
+  if (url.endsWith("/api/v1/audio/transcriptions")) {
+    sttRequests.push({ url, body })
+    return new Response(JSON.stringify({
+      text: "Transcrição do áudio.",
+      usage: { seconds: 9.2, input_tokens: 200, output_tokens: 20, total_tokens: 220, cost: 0.00001 }
+    }))
+  }
   requests.push(body)
   const system = body.messages[0].content
   const isReview = system.includes("Tarefa: revisar o rascunho")
   const isDaily = system.includes("Tarefa: relatório diário de coaching")
-  const content = JSON.stringify(isReview ? fakeModel.review : isDaily ? fakeModel.daily : fakeModel.coach)
+  const isPitaco = system.includes("Tarefa: Pitaco de condução")
+  const content = JSON.stringify(
+    isReview ? fakeModel.review : isDaily ? fakeModel.daily : isPitaco ? fakeModel.pitaco : fakeModel.coach
+  )
   const usage = { prompt_tokens: 1000, completion_tokens: 200, cost: 0.00054 }
   if (!body.stream) {
     return new Response(JSON.stringify({ provider: "Fake", usage, choices: [{ message: { content } }] }))
@@ -236,6 +272,62 @@ try {
   check(decision?.body.state.conversa.length === 2 && decision.body.questions.reply.type === "choice",
     "classify-closing: estado com a mensagem anterior do vendedor e pergunta Choice")
 
+  // Pitaco: rota própria no background, sem streaming, com a conversa fictícia acima. A evidência
+  // inexistente (#9) tem que sair na validação do service.
+  const pitaco = await deliver(listeners, { name: "generate-pitaco", body: { conversation } })
+  check(
+    pitaco?.ok === true && pitaco.data.stageNow === "situacao" && pitaco.data.points[0]?.evidence.join() === "1",
+    `generate-pitaco responde e descarta evidência inexistente (${pitaco?.ok ? pitaco.data.points[0]?.evidence.join() : pitaco?.error})`
+  )
+  const pitacoRequest = requests.at(-1)
+  check(
+    validFormat(pitacoRequest, "stages,bant,stageNow,diagnosis,path,points,questions,warnings,doNow,avoid,replies") &&
+      pitacoRequest?.provider?.require_parameters === true && !pitacoRequest?.stream,
+    `pitaco: formato completo, provedor compatível e sem streaming (${describeRequest(pitacoRequest)})`
+  )
+  if (isDevBuild) {
+    check(pitaco?.meta?.cost?.effective?.usd === 0.00054, `dev: custo efetivo do Pitaco (${JSON.stringify(pitaco?.meta?.cost?.effective ?? null)})`)
+  } else {
+    check(pitaco?.meta?.cost === undefined, "produção: Pitaco sem custo na resposta")
+  }
+
+  // Transcrição de áudio (Whisper): rota própria no background, no endpoint de transcrição (o
+  // `chat/completions` recusa modelos audio->transcription).
+  const transcription = await deliver(listeners, {
+    name: "transcribe-audio",
+    body: {
+      platform: "botconversa",
+      conversationKey: "1",
+      messageKey: "wamid.AUDIO",
+      mimeType: "audio/ogg",
+      audioBase64: "AAAA",
+      bytes: 3
+    }
+  })
+  check(
+    transcription?.ok === true && transcription.text === "Transcrição do áudio.",
+    `transcribe-audio responde (${transcription?.ok ? "ok" : transcription?.error})`
+  )
+  const sttRequest = sttRequests[0]?.body
+  check(
+    sttRequest?.model === "openai/whisper-large-v3-turbo" &&
+      sttRequest?.messages === undefined &&
+      sttRequest?.provider?.data_collection === "deny",
+    `transcrição usa o Whisper no endpoint de áudio, com política de dados (${sttRequests[0]?.url ?? "sem chamada"})`
+  )
+  check(
+    sttRequest?.input_audio?.data === "AAAA" && sttRequest.input_audio.format === "ogg" && sttRequest.language === "pt",
+    "transcrição envia input_audio em base64 e idioma pt"
+  )
+  if (isDevBuild) {
+    check(
+      transcription?.meta?.cost?.effective?.usd === 0.00001,
+      `dev: custo efetivo da transcrição (${JSON.stringify(transcription?.meta?.cost?.effective ?? null)})`
+    )
+  } else {
+    check(transcription?.meta?.cost === undefined, "produção: transcrição sem custo na resposta")
+  }
+
   check(connectListeners.length > 0, "service worker registra o listener de conexões (coaching)")
   const messages = await connect(connectListeners, "coach-conversation", { conversation })
   const deltas = messages.filter((m) => m.type === "delta")
@@ -283,9 +375,12 @@ try {
   check(errors.length === 0, `content script executa sem erro${errors.length ? `: ${errors[0]}` : ""}`)
   check(!!window.document.querySelector("plasmo-csui"), "content script monta a UI na página")
   const contentBundle = script.js.map(read).join("")
+  check(contentBundle.includes("transcribe-audio"), "content script referencia a rota transcribe-audio (sem a chave da API)")
+  // O "Encerrar o dia" saiu da barra: o vendedor não tem mais como gerar o relatório. Os nomes das
+  // rotas continuam no bundle (constantes de `~lib/messages`), então o sinal é o código do botão.
   check(
-    contentBundle.includes("generate-report") && contentBundle.includes("open-report"),
-    "content script referencia as rotas generate-report/open-report (sem a chave da API)"
+    !contentBundle.includes("Encerrar o dia") && !contentBundle.includes("Gerando relatório"),
+    "content script sem o botão de gerar o relatório (Encerrar o dia)"
   )
   const response = await deliver(listeners, { name: "get-conversation" })
   check(response?.conversation?.length === 10 && response.conversationKey === "123", `get-conversation lê a conversa (${response?.conversation?.length ?? 0} mensagens)`)
@@ -363,22 +458,13 @@ try {
   check(false, `side panel executa sem erro: ${error.stack ?? error}`)
 }
 
-// 5. Trava diária, widget e página do relatório --------------------------------------------------
-// Executa a build de verdade para provar as garantias da fase: em produção o widget bloqueia a
-// segunda geração do dia (cota consumida), o relatório não leva custo e a busca de preços não
-// roda; em dev a cota fica livre (para testar) e o custo aparece. A data é a local de hoje, a
-// mesma que `dayKey()` calcula no navegador.
+// 5. Barra do dia e página do relatório ----------------------------------------------------------
+// Executa a build de verdade: a barra não oferece mais gerar o relatório (só o resumo e, no dev, a
+// limpeza dos dados); a página do relatório continua na extensão, sem custo em produção.
 
-const today = (() => {
-  const now = new Date()
-  const pad = (n) => String(n).padStart(2, "0")
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-})()
-
-const REPORT_GENERATED_PREFIX = "drummond.report.generated."
 const REPORT_DATE = "2026-10-07"
 
-/** `chrome` com um `storage.local` em memória (semeado): o mínimo para a trava e a página. */
+/** `chrome` com um `storage.local` em memória (semeado): o mínimo para a barra e a página. */
 const chromeWithStorage = (seed = {}) => {
   const store = { ...seed }
   const area = {
@@ -401,15 +487,12 @@ const chromeWithStorage = (seed = {}) => {
   return chrome
 }
 
-// 5a. Widget do dia no content script ------------------------------------------------------------
+// 5a. Barra do dia no content script ------------------------------------------------------------
 try {
   const contentScript = manifest.content_scripts?.[0]
   const window = new Window({ url: "https://app.botconversa.com.br/1/inbox?chat_id=123" })
   window.document.write(readFileSync("tests/fixtures/botconversa-inbox.html", "utf8"))
-  // Cota do dia já consumida: produção tem que travar o botão; dev ignora a trava de propósito.
-  window.chrome = chromeWithStorage({
-    [`${REPORT_GENERATED_PREFIX}${today}`]: { generatedAt: Date.now(), count: 1 }
-  })
+  window.chrome = chromeWithStorage()
 
   const errors = []
   window.addEventListener("error", (event) => errors.push(event.error ?? event.message))
@@ -418,25 +501,157 @@ try {
 
   // A UI do content script vive num shadow DOM (`plasmo-csui`).
   const root = window.document.querySelector("plasmo-csui")?.shadowRoot ?? window.document
-  const labels = Array.from(root.querySelectorAll("button")).map((button) => button.textContent.trim())
-  const expected = isDevBuild ? "Encerrar o dia" : "Relatório de hoje já gerado"
-  const warning = (root.textContent ?? "").includes("A cota de um relatório por dia já foi usada")
-  check(labels.includes(expected), `widget ${isDevBuild ? "dev" : "produção"}: botão do dia em "${expected}" (${labels.join(" · ") || "nenhum botão"})`)
-  check(warning === !isDevBuild, `widget ${isDevBuild ? "dev" : "produção"}: aviso da cota ${isDevBuild ? "ausente" : "presente"}`)
+  const buttonLabels = () => Array.from(root.querySelectorAll("button")).map((button) => button.textContent.trim())
+  const build = isDevBuild ? "dev" : "produção"
+  // As ferramentas de dev ficam no menu "⋯" da barra; abre para ver tudo o que ela oferece.
+  root.querySelector('button[aria-label="Mais opções do dia"]')?.click()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  const labels = buttonLabels()
+  const reportLabels = labels.filter((label) => /Encerrar o dia|relatório/i.test(label))
+  check(reportLabels.length === 0, `barra do dia ${build}: sem botão de relatório (${labels.join(" · ") || "nenhum botão"})`)
   // Limpar os dados salvos apaga relatórios e a cota diária: só pode existir na build de dev.
   const clearLabel = "Limpar dados salvos (dev)"
   check(
     labels.includes(clearLabel) === isDevBuild,
-    `widget ${isDevBuild ? "dev" : "produção"}: botão "${clearLabel}" ${isDevBuild ? "presente" : "ausente"}`
+    `barra do dia ${build}: botão "${clearLabel}" ${isDevBuild ? "presente" : "ausente"}`
   )
   if (!isDevBuild) {
     const emitted = contentScript.js.map((file) => read(file)).join("\n")
     check(!emitted.includes("Apagar tudo (dev)"), "produção: o código de limpeza dos dados não vai para o bundle")
   }
-  check(errors.length === 0, `widget executa sem erro${errors.length ? `: ${errors[0]}` : ""}`)
+  check(errors.length === 0, `barra do dia executa sem erro${errors.length ? `: ${errors[0]}` : ""}`)
   await window.happyDOM.close()
 } catch (error) {
-  check(false, `widget executa sem erro: ${error.stack ?? error}`)
+  check(false, `barra do dia executa sem erro: ${error.stack ?? error}`)
+}
+
+// 5a'. Pitaco, Revisar e Coaching com áudio no content script -----------------------------------
+// O fluxo inteiro do clique, com o background simulado: a conversa da fixture ganha um áudio (com
+// `src` na página), o content script baixa e manda transcrever, e o Pitaco recebe a transcrição.
+try {
+  const contentScript = manifest.content_scripts?.[0]
+  const window = new Window({ url: "https://app.botconversa.com.br/1/inbox?chat_id=123" })
+  window.document.write(readFileSync("tests/fixtures/botconversa-inbox.html", "utf8"))
+  window.document
+    .querySelector('[data-message-id="wamid.M09"] ._root_bdy01_1')
+    .insertAdjacentHTML("beforeend", '<audio src="https://app.botconversa.com.br/media/m09.ogg"></audio>')
+  // O happy-dom não faz layout: sem uma caixa com tamanho, o campo de texto "não está visível" e o
+  // botão não aparece.
+  window.HTMLElement.prototype.getBoundingClientRect = () =>
+    ({ top: 600, left: 300, right: 900, bottom: 660, width: 600, height: 60, x: 300, y: 600, toJSON() {} })
+  window.fetch = async () =>
+    new window.Response(new window.Blob([new Uint8Array([1, 2, 3, 4])], { type: "audio/ogg" }))
+
+  const chrome = chromeWithStorage()
+  const sent = []
+  const meta = { model: "fake", promptVersion: "x", durationMs: 1000 }
+  chrome.runtime.sendMessage = async (_extensionId, message) => {
+    sent.push(message)
+    if (message?.name === "transcribe-audio") {
+      // Como o background real: grava a transcrição no cache por mensagem antes de responder.
+      const { platform, conversationKey, messageKey } = message.body
+      const key = `drummond.transcript.v1.${platform}.${conversationKey}.${encodeURIComponent(messageKey)}`
+      await chrome.storage.local.set({ [key]: { version: 1, text: "Quero trocar de carro.", at: Date.now(), model: "fake" } })
+      return { ok: true, text: "Quero trocar de carro.", meta: { model: "fake", durationMs: 1, cached: false } }
+    }
+    if (message?.name === "generate-pitaco") {
+      const data = { ...fakeModel.pitaco, points: fakeModel.pitaco.points.map((p) => ({ ...p, evidence: [1] })) }
+      return { ok: true, data, meta }
+    }
+    if (message?.name === "review-draft") return { ok: true, data: fakeModel.review, meta }
+    return undefined
+  }
+  // O side panel pede a conversa por aqui (coaching): guarda o listener para simular o pedido.
+  const listeners = []
+  chrome.runtime.onMessage = { addListener: (fn) => listeners.push(fn), removeListener: () => {} }
+  window.chrome = chrome
+
+  const errors = []
+  window.addEventListener("error", (event) => errors.push(event.error ?? event.message))
+  for (const file of contentScript.js) window.eval(read(file))
+  await new Promise((resolve) => setTimeout(resolve, 400))
+
+  const root = window.document.querySelector("plasmo-csui")?.shadowRoot ?? window.document
+  const button = (label) => Array.from(root.querySelectorAll("button")).find((b) => b.textContent.trim() === label)
+  const pitacoButton = button("Pitaco")
+  check(!!pitacoButton && !!button("Revisar"), "botões Revisar e Pitaco lado a lado na barra do campo")
+
+  pitacoButton?.click()
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  const drawer = root.querySelector("aside[role=dialog]")
+  const transcribe = sent.find((m) => m?.name === "transcribe-audio")
+  const generate = sent.find((m) => m?.name === "generate-pitaco")
+  const audio = generate?.body?.conversation?.find((m) => m.audio)
+  check(
+    transcribe?.body?.audioBase64 === "AQIDBA==" && audio?.transcript === "Quero trocar de carro.",
+    `Pitaco transcreve o áudio antes de gerar (${audio ? `transcrição: ${audio.transcript ?? "nenhuma"}` : "sem áudio na conversa"})`
+  )
+  const text = drawer?.textContent ?? ""
+  check(
+    text.includes("Fazer") && text.includes(fakeModel.pitaco.doNow[0]) && text.includes("Não fazer") &&
+      text.includes(fakeModel.pitaco.avoid[0]) && !text.includes(fakeModel.pitaco.diagnosis) &&
+      text.includes("Sugestões de respostas") && text.includes(fakeModel.pitaco.replies[0]) &&
+      text.includes("inclui 1 áudio transcrito"),
+    "drawer abre na visão simples (Fazer / Não fazer / Sugestões de respostas) e mostra o áudio transcrito"
+  )
+  const buttonLabels = () => Array.from(drawer?.querySelectorAll("button") ?? []).map((b) => b.getAttribute("aria-label") ?? b.textContent.trim())
+  const simpleLabels = buttonLabels()
+  check(
+    simpleLabels.filter((label) => label === "Copiar sugestão").length === fakeModel.pitaco.replies.length &&
+      !simpleLabels.includes("Copiar pergunta"),
+    `visão simples: cada sugestão de resposta tem o seu botão de copiar (${simpleLabels.join(" · ")})`
+  )
+  const drawerButton = (label) => Array.from(drawer?.querySelectorAll("button") ?? []).find((b) => b.textContent.trim() === label)
+  drawerButton("Avançado")?.click()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  const advanced = drawer?.textContent ?? ""
+  check(
+    advanced.includes(fakeModel.pitaco.diagnosis) && advanced.includes("Qualificação (BANT) · 0/4") &&
+      advanced.includes(fakeModel.pitaco.questions[0].text) && !!drawerButton("Simples"),
+    "Avançado mostra a análise completa (SPIN, BANT, diagnóstico e perguntas)"
+  )
+  const labels = buttonLabels()
+  check(
+    ![...simpleLabels, ...labels].some((label) => /aplicar/i.test(label)) &&
+      labels.filter((label) => label === "Copiar pergunta").length === fakeModel.pitaco.questions.length &&
+      !labels.includes("Copiar sugestão"),
+    `drawer sem "Aplicar"; no Avançado, só as perguntas são copiáveis (${labels.join(" · ")})`
+  )
+
+  window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  const closed = !root.querySelector("aside[role=dialog]")
+  button("Pitaco")?.click()
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  const generations = sent.filter((m) => m?.name === "generate-pitaco").length
+  const reopened = root.querySelector("aside[role=dialog]")?.textContent ?? ""
+  check(
+    closed && reopened.includes("Não fazer") && !reopened.includes(fakeModel.pitaco.diagnosis) && generations === 1,
+    `Esc fecha o drawer e reabrir usa o Pitaco guardado, de novo na visão simples (${generations} geração(ões))`
+  )
+
+  // Revisar e Coaching com o mesmo áudio: usam a transcrição do cache, sem novo pedido ao Whisper.
+  const coaching = await deliver(listeners, { name: "get-conversation" })
+  const coachingAudio = coaching?.conversation?.find((m) => m.audio)
+  check(
+    coachingAudio?.transcript === "Quero trocar de carro." && coaching?.audio?.transcribed === 1,
+    `coaching recebe a conversa com a transcrição (${JSON.stringify(coaching?.audio ?? null)})`
+  )
+  button("Revisar")?.click()
+  await new Promise((resolve) => setTimeout(resolve, 400))
+  const review = sent.find((m) => m?.name === "review-draft")
+  const reviewAudio = review?.body?.conversation?.find((m) => m.audio)
+  const transcriptions = sent.filter((m) => m?.name === "transcribe-audio").length
+  check(
+    reviewAudio?.transcript === "Quero trocar de carro." &&
+      (root.textContent ?? "").includes("Contexto da revisão inclui 1 áudio transcrito"),
+    "Revisar envia a transcrição e mostra o áudio transcrito no card"
+  )
+  check(transcriptions === 1, `Pitaco, Coaching e Revisar: um único pedido ao Whisper (${transcriptions})`)
+  check(errors.length === 0, `Pitaco executa sem erro${errors.length ? `: ${errors[0]}` : ""}`)
+  await window.happyDOM.close()
+} catch (error) {
+  check(false, `Pitaco executa sem erro: ${error.stack ?? error}`)
 }
 
 // 5b. Página do relatório (tabs/report.html) ------------------------------------------------------

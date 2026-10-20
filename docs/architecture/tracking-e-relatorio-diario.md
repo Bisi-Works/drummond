@@ -29,7 +29,7 @@ O tracking é **local, passivo e barato**. A extensão observa o que a página d
 guarda no `chrome.storage.local` e não faz nenhuma chamada de modelo. A IA só entra no fim do dia,
 uma vez, a pedido do vendedor, sobre um **resumo compacto** do dia — nunca sobre o histórico completo
 das conversas. Isso mantém o custo previsível (o alvo é ~15 vendedores usando diariamente) e permite
-que widget e painel fiquem coerentes entre abas sem servidor.
+que barra e painel fiquem coerentes entre abas sem servidor.
 
 ## Fluxo ponta a ponta
 
@@ -38,9 +38,9 @@ flowchart TD
   A["Página do Botconversa (DOM)"] --> B["adapter (src/adapters/botconversa.ts)"]
   B --> C["useDayTracking (polling ~1s)"]
   C --> D["chrome.storage.local<br/>drummond.dayLog.&lt;data&gt;"]
-  D --> E["widget flutuante (content script)"]
+  D --> E["barra do dia no cabeçalho (content script)"]
   D --> F["painel lateral (DayOverview)"]
-  E -- "Encerrar o dia" --> G["background: rota generate-report"]
+  E -. "Encerrar o dia (desligado)" .-> G["background: rota generate-report"]
   G --> H["generateDailyReport → OpenRouter"]
   H --> I["JSON validado pelo zod (DailyReport)"]
   I --> J["saveReport em drummond.report.&lt;data&gt;"]
@@ -134,7 +134,7 @@ aplica o resultado com o redutor puro `applyInbox` (`src/lib/tracking/store.ts`)
 - **Credencial**: o JWT de `localStorage.authToken` é lido só em memória a cada ciclo e enviado
   apenas aos hosts `*.botconversa.com.br`; nunca é gravado, logado ou repassado, e um 401 é tratado
   esperando a página renová-lo (não usamos o `refreshToken`). **É uma API interna e não
-  documentada**: pode mudar sem aviso, e nesse caso o tracking continua só pelo DOM (o widget
+  documentada**: pode mudar sem aviso, e nesse caso o tracking continua só pelo DOM (a barra
   avisa "sem sincronizar com a inbox").
 - **Teste com conta de gestor**: `PLASMO_PUBLIC_INBOX_USER_ID=<id do membro>` lista os chats desse
   membro (`user_id_filter`) no lugar de "meus chats". Deixe vazio em produção.
@@ -146,7 +146,6 @@ Todas as chaves são namespaced sob `drummond.` e lidas por data, nunca misturan
 | Chave | Conteúdo | Definida em |
 | --- | --- | --- |
 | `drummond.dayLog.<YYYY-MM-DD>` | `DayLog` do dia (conversas + totais + `updatedAt`) | `src/lib/tracking/constants.ts` |
-| `drummond.widgetPosition` | posição/minimizado do widget, com `version` | `src/lib/tracking/constants.ts` |
 | `drummond.report.<YYYY-MM-DD>` | `StoredReport` (relatório + `input` + modelo/prompt + `cost?`) | `src/lib/report/storage.ts` |
 | `drummond.report.latest` | ponteiro `{ date, generatedAt }` do último relatório | `src/lib/report/storage.ts` |
 | `drummond.report.generated.<YYYY-MM-DD>` | `{ generatedAt, count }` — trava diária | `src/lib/report/storage.ts` |
@@ -158,18 +157,21 @@ Regras de robustez que valem para todo o storage:
   `storageChanges()`, ambos com `try/catch`). Quando a extensão é recarregada com a página aberta, o
   content script perde o `chrome.storage`; ler sem guarda lançaria exceção síncrona dentro de um
   efeito React. Quem chama trata `null` como "sem storage" e segue em memória.
-- **Normalização na leitura**: `toDayLog`, `toStoredReport`, `toReportGeneration`, `toReportRef` e
-  `toWidgetPosition` fazem todo dado vindo do storage passar por um validador. Registro corrompido
+- **Normalização na leitura**: `toDayLog`, `toStoredReport`, `toReportGeneration`, `toReportRef`
+  fazem todo dado vindo do storage passar por um validador. Registro corrompido
   vira dia vazio / `null`, e a UI mostra o estado vazio em vez de quebrar.
-- **Escrita silenciosa**: `saveDay`, `saveDayMerged`, `saveReport`, `markReportGenerated` e
-  `saveWidgetPosition` engolem a falha quando não há storage. `saveReport` é a exceção que devolve
+- **Escrita silenciosa**: `saveDay`, `saveDayMerged`, `saveReport`, `markReportGenerated`
+  engolem a falha quando não há storage. `saveReport` é a exceção que devolve
   `boolean`, porque quem chama precisa saber se o relatório foi realmente persistido.
 
-## 4. Widget e painel — as duas UIs do dia
+## 4. Barra e painel — as duas UIs do dia
 
-- **Widget flutuante** (`src/components/DayWidget.tsx`, injetado pelo content script): lista as
-  conversas acompanhadas, com chip de tempo de espera, badge de alerta e totais do dia. É arrastável
-  e lembra posição/minimizado. É também onde vive o botão **Encerrar o dia**.
+- **Barra do dia** (`src/components/InboxBar.tsx`, injetada pelo content script): fica no espaço
+  livre do cabeçalho do Botconversa (`getHeaderSlot` no adapter, medido por `useHeaderSlot`), com
+  os totais, o badge de alerta e as conversas aguardando como chips. Quantos chips cabem é medido
+  numa régua invisível (`fitCount` em `src/lib/layout.ts`); o resto vai para o "+N". Clicar num chip
+  chama `openConversation`, que troca o `chat_id` da URL e avisa o roteador do SPA. Sem cabeçalho, a
+  barra flutua no canto inferior. O botão **Encerrar o dia** saiu dela por enquanto (ver a seção 5).
 - **Painel lateral** (`src/components/DayOverview.tsx`, em `src/sidepanel.tsx`): os mesmos totais e a
   mesma fila de atenção, lidos do storage **sem adapter** (o painel só lê o que o content script
   gravou). As duas UIs ficam coerentes por construção, sem duplicar a regra do semáforo.
@@ -179,12 +181,17 @@ Regras de robustez que valem para todo o storage:
 
 ## 5. Geração do relatório — `generate-report`
 
-A IA só é chamada no background, a partir do widget. O content script nunca chama o modelo.
+> **Desligado por enquanto (20/10/2026):** o botão **Encerrar o dia** saiu da barra do dia e os
+> vendedores não geram mais o relatório; o código do botão nem vai mais para o content script (o
+> `scripts/check-bundle.mjs` confere). Rota, trava, storage e página continuam
+> na extensão e este documento descreve o fluxo para quando ele voltar.
+
+A IA só é chamada no background, a partir da barra do dia. O content script nunca chama o modelo.
 
 1. `buildReportInput(day, now)` (`src/lib/tracking/report.ts`) monta o payload compacto: totais do
    dia + uma linha por conversa com a **última mensagem truncada** (`REPORT_MESSAGE_MAX = 200`),
    estado, espera e sinais. Conversas sem nenhuma mensagem são descartadas.
-2. O widget manda para a rota `generate-report` (`src/background/messages/generate-report.ts`) via
+2. A barra manda para a rota `generate-report` (`src/background/messages/generate-report.ts`) via
    `sendToBackground`. O nome do arquivo registra a rota para o `@plasmohq/messaging`; não há
    registro manual.
 3. `generateDailyReport` (`src/lib/ai/service.ts`) monta o prompt `<dia>…</dia>`
@@ -269,7 +276,7 @@ relatório e ajuda a comparar resultados entre versões.
 | Adapters | `src/adapters/types.ts`, `src/adapters/index.ts`, `src/adapters/botconversa.ts`, `src/adapters/dom.ts` |
 | Tracking (puro) | `src/lib/tracking/level.ts`, `summary.ts`, `signals.ts`, `format.ts`, `report.ts`, `types.ts`, `constants.ts` |
 | Tracking (persistência) | `src/lib/tracking/store.ts`, `src/lib/chrome-storage.ts`, `src/hooks/useDayTracking.ts` |
-| UI do dia | `src/components/DayWidget.tsx`, `src/components/DayOverview.tsx`, `src/contents/companion.tsx`, `src/sidepanel.tsx` |
+| UI do dia | `src/components/InboxBar.tsx`, `src/components/DayOverview.tsx`, `src/contents/companion.tsx`, `src/sidepanel.tsx` |
 | Relatório | `src/lib/report/storage.ts`, `gate.ts`, `format.ts`, `src/tabs/report.tsx` |
 | IA | `src/lib/ai/service.ts`, `prompts.ts`, `schemas.ts`, `cost.ts`, `company-context.ts` |
 | Rotas do background | `src/background/messages/generate-report.ts`, `open-report.ts`, `src/lib/messages.ts` |

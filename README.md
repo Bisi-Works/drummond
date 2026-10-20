@@ -16,24 +16,24 @@ cabeçalho do painel lateral troca para o claro, e a escolha vale também para o
   vendedor qualificou o lead. Cada critério aparece como cumprido, parcial ou pendente, e os que
   faltam vêm com uma pergunta pronta para fazer ao cliente. A análise aparece aos poucos, conforme
   o modelo escreve (streaming).
-- **Widget do dia**: um painel flutuante e arrastável (posição e minimizado são lembrados) lista as
-  conversas abertas no dia, com um chip de tempo de espera (verde → vermelho) desde a última
-  mensagem do cliente. Um badge no cabeçalho conta as conversas em alerta (laranja/vermelho), essas
-  linhas sobem para o topo com destaque colorido, e o rodapé traz os totais do dia (acompanhadas,
-  aguardando, respondidas) e a média até a primeira resposta. O registro é local
+- **Barra do dia**: presa ao cabeçalho do Botconversa (no espaço livre entre o título da página e
+  os ícones da conta), mostra os totais do dia (acompanhadas, respondidas, média até a primeira
+  resposta) e as conversas aguardando resposta como chips com o tempo de espera (verde → vermelho)
+  desde a última mensagem do cliente, as mais urgentes primeiro. Clicar num chip abre a conversa;
+  o que não cabe vai para um "+N". Um badge conta as conversas em alerta (laranja/vermelho), e o
+  menu "⋯" traz o resumo e os avisos. Sem cabeçalho na página, a barra flutua no
+  canto inferior. O registro é local
   (`chrome.storage.local`), sincroniza entre as abas e não faz nenhuma chamada de IA: revisões e
-  coachings já feitos aparecem anexados à conversa. À meia-noite o widget recomeça no dia novo sem
-  apagar o anterior (que continua no storage, consultável pelo relatório), e cada gravação junta o
+  coachings já feitos aparecem anexados à conversa. À meia-noite a barra recomeça no dia novo sem
+  apagar o anterior (que continua no storage), e cada gravação junta o
   dia ao que já está salvo — duas abas em conversas diferentes não se sobrescrevem.
-- **Resumo do dia no painel**: acima da análise, o painel lateral abre com os mesmos totais do
-  widget (acompanhadas, aguardando, respondidas, revisões, coachings e médias) e a fila de atenção
-  com chips coloridos e tempo de espera. Lê o mesmo `chrome.storage.local`, então widget e painel
+- **Resumo do dia no painel**: acima da análise, o painel lateral abre com os mesmos totais da
+  barra (acompanhadas, aguardando, respondidas, revisões, coachings e médias) e a fila de atenção
+  com chips coloridos e tempo de espera. Lê o mesmo `chrome.storage.local`, então barra e painel
   ficam coerentes entre abas; sem conversas no dia, mostra "Nenhuma conversa acompanhada hoje".
-- **Relatório diário**: o botão **Encerrar o dia** do widget resume o que o tracking acumulou
-  (chats abertos, tempos de espera, revisões e coachings) e pede ao modelo um relatório do dia.
-  O resultado abre em uma página própria da extensão (`tabs/report.html`), de onde o vendedor o
-  leva embora como **PDF** (Imprimir → Salvar em PDF, layout A4), **HTML autocontido** ou cópia do
-  JSON. Em produção cada vendedor gera **um por dia**; no dev a trava fica livre para testes.
+- **Relatório diário (desligado por enquanto)**: o botão **Encerrar o dia** saiu da barra e os
+  vendedores não geram mais o relatório. A rota `generate-report`, o `src/lib/report/` e a página
+  `tabs/report.html` continuam na extensão (ver [Relatório diário](#relatório-diário)).
 
 Stack: [Plasmo](https://docs.plasmo.com/) (React + TypeScript), Tailwind CSS 3 e OpenRouter.
 
@@ -107,11 +107,10 @@ regex. Por isso a checagem não só compila, ela **executa** os bundles em um na
 service worker (com OpenRouter falso, inclusive o streaming, e as rotas `review-draft` e
 `generate-report`), content script (com a fixture do Botconversa), side panel (com o relatório
 chegando aos pedaços) e a página `tabs/report.html` (estado vazio e relatório salvo). Entre as
-garantias que ela confere: a chave só está no background; o bundle do content script referencia as
-rotas `generate-report`/`open-report`; o relatório não leva custo e a busca de preços não roda em
-produção (nem na resposta do coaching), mas o custo aparece no dev; e a trava diária — com a cota
-do dia consumida no `chrome.storage`, o widget de produção mostra "Relatório de hoje já gerado" e
-o de dev continua liberado ("Encerrar o dia"). O modelo ativo e a versão do prompt aparecem no
+garantias que ela confere: a chave só está no background; o bundle do content script não tem
+mais o código do **Encerrar o dia** e a barra não mostra botão de relatório; o
+relatório não leva custo e a busca de preços não roda em produção (nem na resposta do coaching),
+mas o custo aparece no dev. O modelo ativo e a versão do prompt aparecem no
 rodapé do card e do painel.
 
 **Provedores.** O mesmo modelo roda em vários provedores, com preço e velocidade bem diferentes.
@@ -183,7 +182,13 @@ que não são texto do vendedor, com trecho inexistente ou sugestão igual ao or
 
 ## Relatório diário
 
-Ao fim do dia, o widget mostra **Encerrar o dia**: ele resume o que o tracking local já acumulou
+> **Desligado por enquanto (20/10/2026):** o botão **Encerrar o dia** saiu da barra e os vendedores
+> não geram mais o relatório. O resto (rota `generate-report`, trava, storage e a página
+> `tabs/report.html`) continua na extensão; para religar, basta devolver o botão à barra
+> (`src/components/InboxBar.tsx`, ver o histórico do git) e a checagem de rotas do
+> `scripts/check-bundle.mjs`. O texto abaixo descreve o fluxo como funcionava.
+
+Ao fim do dia, a barra mostrava **Encerrar o dia**: ele resume o que o tracking local já acumulou
 (chats abertos, tempos de espera, revisões e coachings anexados) e pede ao modelo um relatório do
 dia. O resultado abre em uma **página própria da extensão** (`tabs/report.html`), com o tema da
 extensão e layout de impressão A4, e sai dali como PDF, HTML autocontido ou JSON.
@@ -217,7 +222,7 @@ A arquitetura do tracking e do relatório está em `docs/architecture/`.
 | Tracking local do dia (estado, semáforo, resumo, payload da IA) | `src/lib/tracking/` (`store.ts`, `level.ts`, `summary.ts`, `report.ts`) |
 | Relatório diário (trava, storage, custo, montagem do texto) | `src/lib/report/` (`gate.ts`, `storage.ts`, `format.ts`) |
 | Página do relatório e exportação em PDF/HTML/JSON | `src/tabs/report.tsx` |
-| Widget flutuante e resumo do painel | `src/components/DayWidget.tsx` e `src/components/DayOverview.tsx` |
+| Barra do dia e resumo do painel | `src/components/InboxBar.tsx` (encaixe no cabeçalho: `getHeaderSlot` do adapter e `src/hooks/useHeaderSlot.ts`) e `src/components/DayOverview.tsx` |
 | Arquitetura do tracking e do relatório | `docs/architecture/` |
 
 ### Se o Botconversa mudar a interface

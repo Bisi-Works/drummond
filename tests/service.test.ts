@@ -454,6 +454,16 @@ describe("dropInvalidImprovements", () => {
     )
     expect(result.improvements.map((i) => i.suggestion)).toEqual(["Olá, tudo bem?", "O valor é 100"])
   })
+
+  it("descarta melhoria sobre áudio transcrito do vendedor (o prompt mostra a transcrição como texto)", async () => {
+    const { dropInvalidImprovements } = await loadService()
+    const audio: ChatMessage = { id: 5, author: "vendedor", text: "[áudio]", audio: true, transcript: "Fala chefe, beleza?" }
+    const result = dropInvalidImprovements(
+      report([{ ...base, messageId: 5, excerpt: "Fala chefe", suggestion: "Olá" }]),
+      [...chat, audio]
+    )
+    expect(result.improvements).toEqual([])
+  })
 })
 
 describe("coaching em streaming", () => {

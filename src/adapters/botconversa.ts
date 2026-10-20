@@ -1,8 +1,14 @@
 import { config } from "~lib/config"
 
-import { listBotconversaChats, listBotconversaMessages } from "./botconversa-api"
+import {
+  downloadBotconversaAudio,
+  listBotconversaChats,
+  listBotconversaMessages,
+  loadBotconversaMedia,
+  readCompanyId
+} from "./botconversa-api"
 import { cleanText, readComposerText, setComposerText } from "./dom"
-import type { ChatAdapter, ChatAuthor, ChatMessage } from "./types"
+import type { ChatAdapter, ChatAudio, ChatAuthor, ChatMessage, HeaderSlot } from "./types"
 
 // Mapeamento do DOM do Botconversa (inbox), feito em 29/09/2026.
 //
@@ -151,6 +157,8 @@ const readMessage = (el: Element): Omit<ChatMessage, "id"> | null => {
   const isNote = el.hasAttribute("data-note-id")
   const author: ChatAuthor = isNote ? "sistema" : hasMod(el, "fromMe") ? "vendedor" : "cliente"
   const template = !isNote && !!el.querySelector(mod("hasButtons"))
+  const messageKey = el.getAttribute("data-message-id") ?? undefined
+  const audio = isAudio(el)
 
   const [body, ...rest] = Array.from(el.querySelectorAll(SELECTORS.body)).filter(outsideQuote)
   let text = body ? cleanText(bodyText(body)) : ""
@@ -173,7 +181,14 @@ const readMessage = (el: Element): Omit<ChatMessage, "id"> | null => {
 
   if (isNote) text = `Nota interna: ${text}`
 
-  return { author, text, time: findTime(el), ...(template && { template }) }
+  return {
+    author,
+    text,
+    time: findTime(el),
+    ...(template && { template }),
+    ...(messageKey && { messageKey }),
+    ...(audio && { audio: true })
+  }
 }
 
 const readSystemChip = (el: Element): Omit<ChatMessage, "id"> | null => {
@@ -218,12 +233,107 @@ export const readBotconversaContactName = (root: ParentNode): string | null => {
   return name && name.length <= CONTACT_NAME_MAX ? name : null
 }
 
+export interface BotconversaAudioSource {
+  url: string
+  mimeType?: string
+}
+
+/** Elemento da mensagem pela `data-message-id`; atributo escapado para ids com aspas/barra. */
+const findMessageElement = (root: ParentNode, messageKey: string) => {
+  const escaped = messageKey.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+  return root.querySelector(`[data-message-id="${escaped}"]`)
+}
+
+/**
+ * Fonte do áudio de uma mensagem, como o player da página a expõe. O Botconversa pode usar um
+ * `<audio>` (com `src` direto ou `<source>`), um `blob:` criado pelo player ou um atributo de URL.
+ * `null` quando o áudio ainda não foi carregado ou não há fonte visível.
+ */
+export const readBotconversaAudioSource = (
+  root: ParentNode,
+  messageKey: string
+): BotconversaAudioSource | null => {
+  const message = findMessageElement(root, messageKey)
+  if (!message) return null
+
+  const audio = message.querySelector("audio")
+  const source = audio?.querySelector("source")
+  const dataUrl =
+    message.getAttribute("data-audio-url") ??
+    message.querySelector("[data-audio-url]")?.getAttribute("data-audio-url")
+  const url = [
+    audio?.currentSrc,
+    audio?.getAttribute("src"),
+    source?.getAttribute("src"),
+    dataUrl
+  ].find((value): value is string => typeof value === "string" && value.trim().length > 0)
+  if (!url) return null
+
+  const mimeType =
+    audio?.getAttribute("type") ?? source?.getAttribute("type") ?? undefined
+  return { url: url.trim(), ...(mimeType && { mimeType }) }
+}
+
+/**
+ * Cabeçalho branco do topo (mapeado em 20/10/2026): `.app__content-section` tem o cabeçalho
+ * (`_container_`, flex `space-between`, 64px) seguido do corpo `.app__content-section_body`. O
+ * cabeçalho tem dois grupos — o título ("Inbox") e os ícones (sino, ajuda, avatar) — e o meio livre.
+ * `_container_` é genérico demais para casar sozinho, por isso partimos do corpo, que é estável.
+ */
+export const readBotconversaHeaderSlot = (root: ParentNode): HeaderSlot | null => {
+  const bar = root.querySelector(".app__content-section_body")?.previousElementSibling
+  if (!(bar instanceof HTMLElement) || !hasMod(bar, "container")) return null
+  const groups = Array.from(bar.children).filter((c): c is HTMLElement => c instanceof HTMLElement)
+  if (groups.length < 2) return { bar, start: null, end: null }
+  return { bar, start: groups[0], end: groups[groups.length - 1] }
+}
+
+/**
+ * Caminho da conversa `key` na inbox: `/<empresa>/inbox?...&chat_id=<key>`. Na inbox mantém os
+ * filtros da URL (`tab`, `status`); fora dela vai para a inbox sem filtro. `null` quando a chave não
+ * é um `chat_id` (o `getConversationKey` cai no `pathname` sem conversa aberta).
+ */
+export const botconversaChatPath = (href: string, key: string): string | null => {
+  if (!/^\d+$/.test(key)) return null
+  const url = new URL(href)
+  const companyId = readCompanyId(url.pathname)
+  if (!companyId) return null
+  const inbox = `/${companyId}/inbox`
+  const params = url.pathname === inbox ? url.searchParams : new URLSearchParams()
+  params.set("chat_id", key)
+  return `${inbox}?${params}`
+}
+
 const apiDeps = () => ({
   fetch: (...args: Parameters<typeof fetch>) => fetch(...args),
   storage: localStorage,
   pathname: location.pathname,
+  chatId: new URL(location.href).searchParams.get("chat_id"),
   userIdFilter: config.inboxUserId
 })
+
+/** Credenciais só para o próprio Botconversa: URL de S3 assinada não aceita cookie e recusaria o CORS. */
+const audioFetchInit = (url: string): RequestInit => {
+  try {
+    const sameOrigin = new URL(url, location.href).origin === location.origin
+    return sameOrigin ? { credentials: "include" } : { credentials: "omit" }
+  } catch {
+    return {}
+  }
+}
+
+/** Baixa o áudio e devolve o blob com o mime mais específico disponível; `null` em qualquer falha. */
+const fetchAudio = async (url: string, mimeType?: string): Promise<ChatAudio | null> => {
+  try {
+    const response = await fetch(url, audioFetchInit(url))
+    if (!response.ok) return null
+    const blob = await response.blob()
+    if (blob.size === 0) return null
+    return { blob, mimeType: blob.type || mimeType || "audio/ogg" }
+  } catch {
+    return null
+  }
+}
 
 export const botconversaAdapter: ChatAdapter = {
   id: "botconversa",
@@ -255,11 +365,51 @@ export const botconversaAdapter: ChatAdapter = {
 
   readConversation: (limit) => readBotconversaConversation(document, limit),
 
+  async readAudio(messageKey): Promise<ChatAudio | null> {
+    // O player do Botconversa é próprio: o DOM não tem `<audio>`/`src`/`data-audio-url`. A URL do
+    // arquivo só existe no payload da mensagem, então a API é o caminho principal e o DOM, fallback.
+    const dom = readBotconversaAudioSource(document, messageKey)
+    const fromDom = dom?.url ? await fetchAudio(dom.url, dom.mimeType) : null
+    if (fromDom) return fromDom
+
+    const media = await loadBotconversaMedia(messageKey, apiDeps())
+    if (!media) return null
+    if (media.url) return fetchAudio(media.url, media.mimeType)
+    return downloadBotconversaAudio(media, apiDeps())
+  },
+
   getContactName: () => readBotconversaContactName(document),
 
   listMyChats: (since) => listBotconversaChats(since, apiDeps()),
 
   listRecentMessages: (key, limit) => listBotconversaMessages(key, limit, apiDeps()),
 
-  getConversationKey: () => new URL(location.href).searchParams.get("chat_id") ?? location.pathname
+  getConversationKey: () => new URL(location.href).searchParams.get("chat_id") ?? location.pathname,
+
+  getHeaderSlot: () => readBotconversaHeaderSlot(document),
+
+  // A inbox é um SPA com React Router (v6): `pushState` muda a URL e o `popstate` sintético faz o
+  // roteador reler a localização, como o "voltar" do navegador. O estado segue o formato dele
+  // (`usr`/`key`/`idx`) para o histórico continuar navegável.
+  openConversation(key) {
+    const path = botconversaChatPath(location.href, key)
+    if (!path) return false
+    if (`${location.pathname}${location.search}` === path) return true
+    const idx = typeof history.state?.idx === "number" ? history.state.idx + 1 : 0
+    const state = { usr: null, key: Math.random().toString(36).slice(2, 10), idx }
+    history.pushState(state, "", path)
+    window.dispatchEvent(new PopStateEvent("popstate", { state }))
+    return true
+  },
+
+  // O app (`#root > .app`) ocupa a largura do `body`: a margem à direita encolhe tudo, cabeçalho
+  // incluído (mapeado em 20/10/2026). A coluna da lista tem largura mínima e não encolhe, então quem
+  // perde espaço é o chat — por isso quem chama só empurra quando o chat ainda cabe. O `resize`
+  // sintético faz a página e os nossos hooks remedirem na hora, sem esperar o polling.
+  setRightInset(px) {
+    const value = px > 0 ? `${px}px` : ""
+    if (document.body.style.marginRight === value) return
+    document.body.style.marginRight = value
+    window.dispatchEvent(new Event("resize"))
+  }
 }

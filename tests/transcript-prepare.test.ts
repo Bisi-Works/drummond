@@ -1,0 +1,68 @@
+import { describe, expect, it } from "vitest"
+
+import type { ChatMessage } from "~adapters/types"
+import {
+  applyTranscripts,
+  audioWithoutTranscript,
+  transcriptRefs
+} from "~lib/transcripts/prepare"
+
+const conversation: ChatMessage[] = [
+  { id: 1, author: "cliente", text: "Oi" },
+  {
+    id: 2,
+    author: "cliente",
+    text: "[áudio]",
+    audio: true,
+    messageKey: "a",
+    transcript: "Já transcrito"
+  },
+  { id: 3, author: "vendedor", text: "[áudio]", audio: true, messageKey: "b" },
+  { id: 4, author: "vendedor", text: "[áudio]", audio: true }
+]
+
+describe("audioWithoutTranscript", () => {
+  it("seleciona só áudios com messageKey e sem transcrição", () => {
+    expect(audioWithoutTranscript(conversation).map((m) => m.messageKey)).toEqual(["b"])
+  })
+})
+
+describe("transcriptRefs", () => {
+  it("monta as referências de cache com plataforma e conversa", () => {
+    expect(transcriptRefs("botconversa", "123", conversation)).toEqual([
+      { platform: "botconversa", conversationKey: "123", messageKey: "b" }
+    ])
+  })
+})
+
+describe("applyTranscripts", () => {
+  it("aplica pelo messageKey sem alterar as outras mensagens", () => {
+    const next = applyTranscripts(conversation, { b: "Novo contexto", a: "ignorado" })
+
+    expect(next[1].transcript).toBe("Já transcrito")
+    expect(next[2].transcript).toBe("Novo contexto")
+    expect(next[3].transcript).toBeUndefined()
+    expect(next[0]).toBe(conversation[0])
+  })
+
+  it("preserva a identidade quando o texto é igual", () => {
+    const next = applyTranscripts(conversation, { a: "Já transcrito" })
+    expect(next[1]).toBe(conversation[1])
+  })
+})
+
+describe("audioSummary / describeAudio", () => {
+  it("conta áudios com e sem transcrição e monta o texto do rodapé", async () => {
+    const { audioSummary, describeAudio } = await import("~lib/transcripts/prepare")
+    const summary = audioSummary([
+      { id: 1, author: "cliente", text: "[áudio]", audio: true, transcript: "Oi" },
+      { id: 2, author: "cliente", text: "[áudio]", audio: true },
+      { id: 3, author: "vendedor", text: "[áudio]", audio: true, transcript: "Olá" },
+      { id: 4, author: "cliente", text: "Texto" }
+    ])
+    expect(summary).toEqual({ transcribed: 2, missing: 1 })
+    expect(describeAudio(summary)).toBe("inclui 2 áudios transcritos · 1 áudio não transcrito")
+    expect(describeAudio({ transcribed: 1, missing: 0 })).toBe("inclui 1 áudio transcrito")
+    expect(describeAudio({ transcribed: 0, missing: 0 })).toBe("")
+  })
+})

@@ -1,7 +1,7 @@
 import type { ChatAuthor, InboxChat } from "~adapters/types"
 import { localArea, storageChanges } from "~lib/chrome-storage"
 
-import { DAY_LOG_PREFIX, WIDGET_POSITION_KEY, WIDGET_POSITION_VERSION } from "./constants"
+import { DAY_LOG_PREFIX } from "./constants"
 import { isClosingMessage } from "./closing"
 import { dayKey } from "./level"
 import type {
@@ -31,19 +31,6 @@ export interface ConversationObservation {
   /** Instante da observação (epoch ms), injetado para o redutor ser puro. */
   now: number
 }
-
-/** Posição do widget flutuante, para ele voltar onde o vendedor o deixou. */
-export interface WidgetPosition {
-  top: number
-  /** Distância da borda direita — a posição ancorada padrão; some depois que o widget é arrastado. */
-  right?: number
-  /** Distância da borda esquerda quando o vendedor arrastou o widget para outra posição. */
-  left?: number
-  minimized: boolean
-}
-
-/** Posição inicial: junto à navbar do Botconversa (topo à direita), aberta. */
-export const DEFAULT_WIDGET_POSITION: WidgetPosition = { top: 64, right: 16, minimized: false }
 
 /** Notificado a cada gravação de um dia em `chrome.storage.local` (inclusive de outra aba). */
 export type DayChangeListener = (day: DayLog, date: string) => void
@@ -469,38 +456,3 @@ export const subscribeDay = (onChange: DayChangeListener): (() => void) => {
   return () => onChanged.removeListener(listener)
 }
 
-/** Valida a posição salva; valor ausente, de outra versão ou corrompido cai na posição padrão. */
-export const toWidgetPosition = (value: unknown): WidgetPosition => {
-  if (!value || typeof value !== "object") return DEFAULT_WIDGET_POSITION
-  const stored = value as Partial<WidgetPosition> & { version?: unknown }
-  if (stored.version !== WIDGET_POSITION_VERSION || !isFiniteNumber(stored.top)) {
-    return DEFAULT_WIDGET_POSITION
-  }
-  const position: WidgetPosition = { top: stored.top, minimized: stored.minimized === true }
-  if (isFiniteNumber(stored.right)) position.right = stored.right
-  if (isFiniteNumber(stored.left)) position.left = stored.left
-  return position
-}
-
-/** Posição salva do widget; sem storage ou com dados ruins, devolve a posição padrão. */
-export const loadWidgetPosition = async (): Promise<WidgetPosition> => {
-  const area = localArea()
-  if (!area) return DEFAULT_WIDGET_POSITION
-  try {
-    const items = await area.get(WIDGET_POSITION_KEY)
-    return toWidgetPosition(items?.[WIDGET_POSITION_KEY])
-  } catch {
-    return DEFAULT_WIDGET_POSITION
-  }
-}
-
-/** Grava a posição do widget com a versão do formato, para permitir migração depois. */
-export const saveWidgetPosition = async (position: WidgetPosition): Promise<void> => {
-  const area = localArea()
-  if (!area) return
-  try {
-    await area.set({ [WIDGET_POSITION_KEY]: { version: WIDGET_POSITION_VERSION, ...position } })
-  } catch {
-    // Sem storage: o widget volta à posição padrão na próxima abertura.
-  }
-}

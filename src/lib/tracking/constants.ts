@@ -13,9 +13,3 @@ export const WAIT_LIMITS_MS = {
 
 /** Prefixo da chave do dia em `chrome.storage.local` (uma chave por data, ex.: "drummond.dayLog.2026-10-07"). */
 export const DAY_LOG_PREFIX = "drummond.dayLog."
-
-/** Chave da posição do widget flutuante, para ele voltar onde o vendedor o deixou. */
-export const WIDGET_POSITION_KEY = "drummond.widgetPosition"
-
-/** Versão do formato da posição salva: permite migrar sem perder a posição do widget. */
-export const WIDGET_POSITION_VERSION = 1

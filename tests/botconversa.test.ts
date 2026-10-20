@@ -3,14 +3,18 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   botconversaAdapter,
+  botconversaChatPath,
+  readBotconversaAudioSource,
   readBotconversaContactName,
   readBotconversaConversation,
+  readBotconversaHeaderSlot,
   visualOrder
 } from "~adapters/botconversa"
+import { resetBotIdCache, resetMediaCache } from "~adapters/botconversa-api"
 
 // `URL` aqui é a implementação do happy-dom, que não aceita file:// — por isso fileURLToPath.
 const fixturePath = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "botconversa-inbox.html")
@@ -20,6 +24,13 @@ beforeEach(() => {
   document.open()
   document.write(fixture)
   document.close()
+  resetBotIdCache()
+  resetMediaCache()
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  localStorage.clear()
 })
 
 describe("readBotconversaConversation", () => {
@@ -73,6 +84,16 @@ describe("readBotconversaConversation", () => {
     ])
   })
 
+  it("mantém a messageKey estável mesmo quando a conversa é cortada", () => {
+    const full = readBotconversaConversation(document, 50)
+    const lastThree = readBotconversaConversation(document, 3)
+
+    expect(lastThree.map((m) => [m.id, m.messageKey])).toEqual(
+      full.slice(-3).map((m, index) => [index + 1, m.messageKey])
+    )
+    expect(lastThree.map((m) => m.messageKey)).toEqual(["wamid.M08", "wamid.M09", "wamid.M10"])
+  })
+
   it("descreve mensagens só com imagem", () => {
     document.body.innerHTML = `
       <div class="_chatArea_x1"><div data-message-id="1" class="_root_m1 _fromMe_m1">
@@ -80,7 +101,7 @@ describe("readBotconversaConversation", () => {
         <div class="_absolute_a1"><div class="paragraph-xsmall">14:17</div></div>
       </div></div>`
     expect(readBotconversaConversation(document, 50)).toEqual([
-      { id: 1, author: "vendedor", text: "[imagem]", time: "14:17" }
+      { id: 1, author: "vendedor", text: "[imagem]", time: "14:17", messageKey: "1" }
     ])
   })
 
@@ -102,8 +123,22 @@ describe("readBotconversaConversation", () => {
         </div>
       </div>`
     expect(readBotconversaConversation(document, 50)).toEqual([
-      { id: 1, author: "vendedor", text: "[áudio]", time: undefined },
-      { id: 2, author: "cliente", text: "[áudio]", time: "14:20" }
+      {
+        id: 1,
+        author: "vendedor",
+        text: "[áudio]",
+        time: undefined,
+        messageKey: "1",
+        audio: true
+      },
+      {
+        id: 2,
+        author: "cliente",
+        text: "[áudio]",
+        time: "14:20",
+        messageKey: "2",
+        audio: true
+      }
     ])
   })
 
@@ -136,6 +171,151 @@ describe("readBotconversaConversation", () => {
   })
 })
 
+describe("readBotconversaAudioSource", () => {
+  it("lê o src direto do elemento audio", () => {
+    document.body.innerHTML = `
+      <div data-message-id="audio-1">
+        <audio src="https://cdn.example/nota.ogg" type="audio/ogg"></audio>
+      </div>`
+
+    expect(readBotconversaAudioSource(document, "audio-1")).toEqual({
+      url: "https://cdn.example/nota.ogg",
+      mimeType: "audio/ogg"
+    })
+  })
+
+  it("cai para o source interno e para o atributo data-audio-url", () => {
+    document.body.innerHTML = `
+      <div data-message-id="audio-2">
+        <audio><source src="blob:https://app.botconversa.com.br/123" type="audio/ogg"></audio>
+      </div>
+      <div data-message-id="audio-3" data-audio-url="https://cdn.example/3.mp3"></div>`
+
+    expect(readBotconversaAudioSource(document, "audio-2")).toEqual({
+      url: "blob:https://app.botconversa.com.br/123",
+      mimeType: "audio/ogg"
+    })
+    expect(readBotconversaAudioSource(document, "audio-3")).toEqual({
+      url: "https://cdn.example/3.mp3"
+    })
+  })
+
+  it("devolve null para mensagem ausente ou sem fonte de áudio", () => {
+    document.body.innerHTML = '<div data-message-id="texto">Oi</div>'
+
+    expect(readBotconversaAudioSource(document, "nao-existe")).toBeNull()
+    expect(readBotconversaAudioSource(document, "texto")).toBeNull()
+  })
+})
+
+describe("readAudio", () => {
+  const messageWire = (id: string, url: string | null, mediaId = "") =>
+    JSON.stringify({
+      messages: [
+        {
+          message_id: id,
+          message_content: mediaId,
+          message_type: "audio",
+          is_from_account: false,
+          timestamp: 1791471958,
+          note_id: null,
+          media: [{ media_s3_url: url, media_id: mediaId, mime_type: "audio/ogg", file_size: 3, duration: 1 }]
+        }
+      ]
+    })
+
+  const stubApi = (id: string, url: string | null, mediaId = "") => {
+    const calls: string[] = []
+    const impl = vi.fn(async (target: RequestInfo | URL) => {
+      const value = String(target)
+      calls.push(value)
+      if (value.includes("/companies/")) return new Response(JSON.stringify({ bot: 555 }), { status: 200 })
+      if (value.includes("/jwt_api/messages/")) return new Response(messageWire(id, url, mediaId), { status: 200 })
+      if (value.startsWith("https://bucket.example/")) {
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { "content-type": "audio/ogg" }
+        })
+      }
+      return new Response("", { status: 404 })
+    })
+    vi.stubGlobal("fetch", impl)
+    return { impl, calls }
+  }
+
+  beforeEach(() => {
+    window.history.replaceState({}, "", "/110105/inbox?chat_id=38100790")
+    localStorage.setItem("authToken", "jwt-token")
+  })
+
+  it("busca o áudio pela API quando o DOM não expõe a fonte (player próprio)", async () => {
+    const { calls } = stubApi("wamid.M10", "https://bucket.example/a.ogg")
+
+    const audio = await botconversaAdapter.readAudio!("wamid.M10")
+
+    expect(audio?.mimeType).toBe("audio/ogg")
+    expect(audio?.blob.size).toBe(3)
+    expect(calls.at(-1)).toBe("https://bucket.example/a.ogg")
+  })
+
+  it("cai para a API quando o src do DOM não responde", async () => {
+    document.body.innerHTML = `
+      <div data-message-id="wamid.M10">
+        <audio src="https://cdn.example/quebrado.ogg" type="audio/ogg"></audio>
+      </div>`
+    stubApi("wamid.M10", "https://bucket.example/a.ogg")
+
+    const audio = await botconversaAdapter.readAudio!("wamid.M10")
+
+    expect(audio?.blob.size).toBe(3)
+  })
+
+  it("baixa por get_media_url quando a API não traz URL (conta oficial)", async () => {
+    const calls: string[] = []
+    const impl = vi.fn(async (target: RequestInfo | URL) => {
+      const value = String(target)
+      calls.push(value)
+      if (value.includes("/companies/")) return new Response(JSON.stringify({ bot: 555 }), { status: 200 })
+      if (value.includes("/jwt_api/messages/")) {
+        return new Response(messageWire("wamid.M10", "", "2242648623129802"), { status: 200 })
+      }
+      if (value.includes("/jwt_api/chat/get_media_url/")) {
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { "content-type": "audio/ogg" }
+        })
+      }
+      return new Response("", { status: 404 })
+    })
+    vi.stubGlobal("fetch", impl)
+
+    const audio = await botconversaAdapter.readAudio!("wamid.M10")
+
+    expect(audio?.blob.size).toBe(3)
+    expect(audio?.mimeType).toBe("audio/ogg")
+    const mediaUrl = new URL(calls.find((value) => value.includes("get_media_url"))!)
+    expect(mediaUrl.searchParams.get("media_id")).toBe("2242648623129802")
+    expect(mediaUrl.searchParams.get("bot_id")).toBe("555")
+  })
+
+  it("devolve null quando a API não tem a mídia ou a URL não responde", async () => {
+    stubApi("wamid.M10", null)
+    expect(await botconversaAdapter.readAudio!("wamid.M10")).toBeNull()
+
+    resetMediaCache()
+    const failing = vi.fn(async (target: RequestInfo | URL) => {
+      const value = String(target)
+      if (value.includes("/companies/")) return new Response(JSON.stringify({ bot: 555 }), { status: 200 })
+      if (value.includes("/jwt_api/messages/")) {
+        return new Response(messageWire("wamid.M10", "https://bucket.example/erro.ogg"), { status: 200 })
+      }
+      return new Response("", { status: 404 })
+    })
+    vi.stubGlobal("fetch", failing)
+    expect(await botconversaAdapter.readAudio!("wamid.M10")).toBeNull()
+  })
+})
+
 describe("readBotconversaContactName", () => {
   it("lê o nome do contato no cabeçalho, sem as iniciais do avatar nem espaços sobrando", () => {
     expect(readBotconversaContactName(document)).toBe("João da Silva")
@@ -164,6 +344,103 @@ describe("readBotconversaContactName", () => {
 
   it("não afeta a leitura das mensagens", () => {
     expect(readBotconversaConversation(document, 50)).toHaveLength(10)
+  })
+})
+
+// Cabeçalho do topo (mapeado em 20/10/2026), fora do fixture da conversa.
+const HEADER = `
+  <div class="app__content-section">
+    <div class="_container_1b39y_1">
+      <div class="flex g-1-5"><div class="headline-xsmall _left_iuhu7_8">Inbox</div></div>
+      <div class="flex align-center g-1-5"><div class="_profile_x397k_1">B</div></div>
+    </div>
+    <div class="_hasHeader_1ei47_7 app__content-section_body"></div>
+  </div>`
+
+describe("readBotconversaHeaderSlot", () => {
+  it("acha o cabeçalho pelo corpo e separa o título dos ícones", () => {
+    document.body.innerHTML = HEADER
+    const slot = readBotconversaHeaderSlot(document)
+    expect(slot?.bar.className).toContain("_container_")
+    expect(slot?.start?.textContent).toBe("Inbox")
+    expect(slot?.end?.querySelector('[class^="_profile_"]')).not.toBeNull()
+    expect(botconversaAdapter.getHeaderSlot?.()?.bar).toBe(slot?.bar)
+  })
+
+  it("devolve null sem o corpo ou quando o vizinho não é o cabeçalho", () => {
+    expect(readBotconversaHeaderSlot(document)).toBeNull()
+    document.body.innerHTML = '<div><div class="_other_x_1"></div><div class="app__content-section_body"></div></div>'
+    expect(readBotconversaHeaderSlot(document)).toBeNull()
+  })
+
+  it("sem os dois grupos, devolve o cabeçalho sem as pontas", () => {
+    document.body.innerHTML =
+      '<div><div class="_container_a_1"><div>só um</div></div><div class="app__content-section_body"></div></div>'
+    const slot = readBotconversaHeaderSlot(document)
+    expect(slot?.bar).not.toBeNull()
+    expect(slot?.start).toBeNull()
+    expect(slot?.end).toBeNull()
+  })
+})
+
+describe("botconversaChatPath", () => {
+  it("na inbox, mantém os filtros e troca o chat_id", () => {
+    expect(botconversaChatPath("https://app.botconversa.com.br/110105/inbox?tab=all&status=all&chat_id=1", "42")).toBe(
+      "/110105/inbox?tab=all&status=all&chat_id=42"
+    )
+  })
+
+  it("fora da inbox, vai para a inbox da empresa sem filtros", () => {
+    expect(botconversaChatPath("https://app.botconversa.com.br/110105/contacts?page=2", "42")).toBe(
+      "/110105/inbox?chat_id=42"
+    )
+  })
+
+  it("recusa chave que não é chat_id ou página sem empresa", () => {
+    expect(botconversaChatPath("https://app.botconversa.com.br/110105/inbox", "/110105/inbox")).toBeNull()
+    expect(botconversaChatPath("https://app.botconversa.com.br/login", "42")).toBeNull()
+  })
+})
+
+describe("openConversation", () => {
+  it("empurra a URL do chat e avisa o roteador com popstate", () => {
+    history.replaceState({ usr: null, key: "a", idx: 3 }, "", "/110105/inbox?tab=all")
+    const onPopState = vi.fn()
+    window.addEventListener("popstate", onPopState)
+    try {
+      expect(botconversaAdapter.openConversation?.("42")).toBe(true)
+      expect(location.pathname + location.search).toBe("/110105/inbox?tab=all&chat_id=42")
+      expect(history.state).toMatchObject({ idx: 4 })
+      expect(onPopState).toHaveBeenCalledTimes(1)
+      expect(botconversaAdapter.getConversationKey()).toBe("42")
+
+      // Já aberta: nada a fazer.
+      expect(botconversaAdapter.openConversation?.("42")).toBe(true)
+      expect(onPopState).toHaveBeenCalledTimes(1)
+
+      expect(botconversaAdapter.openConversation?.("sem-id")).toBe(false)
+    } finally {
+      window.removeEventListener("popstate", onPopState)
+    }
+  })
+})
+
+describe("setRightInset", () => {
+  it("reserva a borda direita no body e avisa o resize só quando muda", () => {
+    const onResize = vi.fn()
+    window.addEventListener("resize", onResize)
+    try {
+      botconversaAdapter.setRightInset?.(400)
+      expect(document.body.style.marginRight).toBe("400px")
+      botconversaAdapter.setRightInset?.(400)
+      expect(onResize).toHaveBeenCalledTimes(1)
+
+      botconversaAdapter.setRightInset?.(0)
+      expect(document.body.style.marginRight).toBe("")
+      expect(onResize).toHaveBeenCalledTimes(2)
+    } finally {
+      window.removeEventListener("resize", onResize)
+    }
   })
 })
 

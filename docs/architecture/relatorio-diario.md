@@ -18,6 +18,11 @@ Referência da geração do relatório do dia com IA: o que entra no prompt, o f
 de 1 geração por dia em produção, o painel de custo exclusivo do dev e as três saídas (página, HTML
 autocontido e PDF).
 
+> **Desligado por enquanto (20/10/2026):** o botão **Encerrar o dia** saiu da barra do dia e os
+> vendedores não geram mais o relatório; o código do botão nem vai mais para o content script (o
+> `scripts/check-bundle.mjs` confere). Rota, trava, storage e página continuam
+> na extensão e este documento descreve o fluxo para quando ele voltar.
+
 - Fluxo completo e camadas anteriores: [[Tracking-e-Relatorio-Diario]].
 - Semáforo, totais e fila de atenção que alimentam o payload: [[Alertas-e-Metricas-do-Dia]].
 

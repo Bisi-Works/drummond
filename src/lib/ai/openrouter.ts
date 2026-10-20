@@ -5,6 +5,7 @@ import type { PromptMessages } from "./prompts"
 import type { toResponseFormat } from "./schemas"
 
 const ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
+const TRANSCRIPTIONS_ENDPOINT = "https://openrouter.ai/api/v1/audio/transcriptions"
 const MODELS_API = "https://openrouter.ai/api/v1/models"
 
 // Lida só aqui para ficar apenas no bundle do background (ver comentário em lib/config.ts).
@@ -117,6 +118,112 @@ const readErrorDetail = async (response: Response) => {
 
 const providerError = (body: any, effective: EffectiveCost | null = null) =>
   new OpenRouterError(`Erro do provedor: ${body.error.message ?? "desconhecido"}`, undefined, effective)
+
+// A resposta de `/audio/transcriptions` traz `usage` próprio (segundos, tokens de entrada/saída e
+// custo), diferente do `usage` do chat.
+const toTranscriptionEffective = (body: any): EffectiveCost | null => {
+  const usage = body?.usage
+  if (!usage) return null
+  return {
+    usd: typeof usage.cost === "number" ? usage.cost : null,
+    inputTokens: usage.input_tokens ?? 0,
+    outputTokens: usage.output_tokens ?? 0,
+    reasoningTokens: 0,
+    provider: typeof body.provider === "string" ? body.provider : undefined
+  }
+}
+
+const describeTranscriptionError = (status: number, detail: string) => {
+  switch (status) {
+    case 400:
+      return `Requisição de transcrição recusada pelo OpenRouter: ${detail}`
+    case 401:
+      return "Chave do OpenRouter inválida ou revogada. Gere uma nova build com a chave correta."
+    case 402:
+      return "Sem créditos no OpenRouter. Avise o responsável pela chave."
+    case 403:
+      return "O conteúdo do áudio foi bloqueado pela moderação do provedor."
+    case 404:
+      return `Nenhum provedor do modelo "${config.stt.model}" atende à transcrição com a política de dados da extensão. Detalhe: ${detail}`
+    case 408:
+      return "A transcrição demorou demais para responder. Tente novamente."
+    case 429:
+      return "Muitas transcrições em sequência. Aguarde alguns segundos e tente de novo."
+    default:
+      return status >= 500
+        ? "O provedor da transcrição está instável no momento. Tente novamente em instantes."
+        : `Erro ${status} na transcrição: ${detail}`
+  }
+}
+
+export interface TranscriptionResult {
+  text: string
+  effective: EffectiveCost | null
+}
+
+/**
+ * Transcreve um áudio no Whisper via OpenRouter. O modelo `audio->transcription` é recusado no
+ * `chat/completions`: a chamada vai para `/audio/transcriptions`, que aceita só a política de
+ * dados em `provider` (a ordem de provedores não se aplica) e não recebe prompt.
+ */
+export const transcribeAudio = async ({
+  audioBase64,
+  format
+}: {
+  audioBase64: string
+  format: string
+}): Promise<TranscriptionResult> => {
+  const apiKey = getApiKey()
+  if (!apiKey) {
+    throw new OpenRouterError(
+      "Chave do OpenRouter ausente. Defina PLASMO_PUBLIC_OPENROUTER_API_KEY no .env e gere a build novamente."
+    )
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), config.stt.timeoutMs)
+
+  try {
+    const response = await fetch(TRANSCRIPTIONS_ENDPOINT, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "X-OpenRouter-Title": "Drummond by BW"
+      },
+      body: JSON.stringify({
+        model: config.stt.model,
+        input_audio: { data: audioBase64, format },
+        language: "pt",
+        ...(config.denyDataCollection && { provider: { data_collection: "deny" } })
+      })
+    })
+
+    if (!response.ok) {
+      throw new OpenRouterError(
+        describeTranscriptionError(response.status, await readErrorDetail(response)),
+        response.status
+      )
+    }
+
+    const body = await response.json()
+    if (body?.error) throw providerError(body)
+    const text = body?.text
+    if (typeof text !== "string" || !text.trim()) {
+      throw new OpenRouterError("A transcrição veio vazia. Tente novamente.", undefined, toTranscriptionEffective(body))
+    }
+    return { text: text.trim(), effective: toTranscriptionEffective(body) }
+  } catch (error) {
+    if (error instanceof OpenRouterError) throw error
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new OpenRouterError("A transcrição demorou demais para responder. Tente novamente.")
+    }
+    throw new OpenRouterError("Falha de rede ao transcrever o áudio. Verifique sua conexão.")
+  } finally {
+    clearTimeout(timeout)
+  }
+}
 
 /**
  * Lê o corpo SSE de uma resposta em streaming e entrega cada evento `data:` já como objeto.

@@ -6,8 +6,15 @@ import { estimateCost, estimateTokens, pricingRange, type CostEstimate, type Cos
 import { chatCompletion, fetchModelEndpoints, OpenRouterError } from "./openrouter"
 import { parseModelJson } from "./parse"
 import {
+  MAX_PITACO_HINT_CHARS,
+  MAX_PITACO_QUESTION_CHARS,
+  MAX_PITACO_REPLY_CHARS,
+  MAX_PITACO_TOPIC_CHARS
+} from "./constants"
+import {
   buildCoachPrompt,
   buildDailyReportPrompt,
+  buildPitacoPrompt,
   buildReviewPrompt,
   PROMPT_VERSION,
   type PromptMessages
@@ -18,12 +25,15 @@ import {
   draftReviewSchema,
   limitCoaching,
   limitDailyReport,
+  limitPitaco,
   limitReview,
+  pitacoSchema,
   toResponseFormat,
   type BantItem,
   type CoachingReport,
   type DailyReport,
-  type DraftReview
+  type DraftReview,
+  type Pitaco
 } from "./schemas"
 
 export interface AiMeta {
@@ -120,6 +130,7 @@ const complete = async (
 const REVIEW_OVERHEAD_TOKENS = 150
 const COACHING_OUTPUT_TOKENS = 1000
 const REPORT_OUTPUT_TOKENS = 1200
+const PITACO_OUTPUT_TOKENS = 900
 
 const reviewFormat = toResponseFormat("draft_review", draftReviewSchema, config.review.responseFormat)
 const coachingFormat = toResponseFormat(
@@ -128,6 +139,7 @@ const coachingFormat = toResponseFormat(
   config.coach.responseFormat
 )
 const reportFormat = toResponseFormat("daily_report", dailyReportSchema, config.report.responseFormat)
+const pitacoFormat = toResponseFormat("pitaco", pitacoSchema, config.pitaco.responseFormat)
 
 // Garante coerência entre status e texto: "ok" nunca altera o rascunho, e uma sugestão idêntica ao
 // original é tratada como "ok" (alguns modelos marcam "ajustes" sem mudar nada).
@@ -168,6 +180,91 @@ export const dropInvalidImprovements = (
   })
 })
 
+// Palavras que não dizem o assunto de uma pergunta ("você tem algum…", "para eu entender melhor…").
+const FILLER = new Set(
+  "voce para isso esse essa como quando mais melhor entender algum alguma sobre pode posso gente aqui agora ainda assim porque entao tudo minha meu seu sua tem ter queria quer ajudar".split(" ")
+)
+
+/** Assunto de um texto: radicais (5 letras, sem acento) das palavras de 4+ letras que não são enchimento. */
+const subject = (text: string) =>
+  new Set(
+    (text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().match(/[a-z]{4,}/g) ?? [])
+      .filter((word) => !FILLER.has(word))
+      .map((word) => word.slice(0, 5))
+  )
+
+/**
+ * Se o vendedor falou por último (texto livre, ainda sem resposta do cliente), o assunto da última
+ * pergunta dele; senão, null.
+ */
+const unansweredSellerQuestion = (conversation: ChatMessage[]) => {
+  const last = conversation.findLast((m) => m.author === "cliente" || (m.author === "vendedor" && !m.template))
+  if (last?.author !== "vendedor") return null
+  const question = (last.transcript ?? last.text).split(/(?<=[.!?])\s+/).findLast((s) => s.includes("?"))
+  const asked = question ? subject(question) : null
+  return asked && asked.size >= 2 ? asked : null
+}
+
+/** Alguma frase da sugestão volta ao assunto da pergunta que o cliente ainda não respondeu. */
+const repeatsQuestion = (reply: string, asked: Set<string>) =>
+  reply
+    .split(/(?<=[.!?])\s+/)
+    .some((sentence) => [...subject(sentence)].filter((word) => asked.has(word)).length >= asked.size * 0.6)
+
+/**
+ * Mantém o Pitaco ancorado na conversa e longe de mensagem pronta: tira de `evidence` os números
+ * que não existem; descarta o ponto ou a pergunta que só citava mensagens inexistentes (o modelo
+ * inventou a base); descarta perguntas longas ou com quebra de linha (viraram texto para enviar) e
+ * esvazia a dica nas mesmas condições; no resumo Fazer / Não fazer, descarta o conselho vazio, longo
+ * ou com quebra de linha; nas sugestões de resposta, descarta a vazia, a longa demais, a que traz
+ * marcador de preenchimento ou nome genérico e a que repete a pergunta que o vendedor acabou de fazer.
+ * Depois limita as listas.
+ */
+export const sanitizePitaco = (pitaco: Pitaco, conversation: ChatMessage[]): Pitaco => {
+  const ids = new Set(conversation.map((m) => m.id))
+  const anchored = <T extends { evidence: number[] }>(item: T): T | null => {
+    const evidence = [...new Set(item.evidence.filter((id) => ids.has(id)))]
+    return item.evidence.length > 0 && evidence.length === 0 ? null : { ...item, evidence }
+  }
+  const short = (text: string, max: number) => !/\n/.test(text.trim()) && text.trim().length <= max
+  // O resumo é lido sem a conversa ao lado: citação de mensagem ("(#6)", "#6") só atrapalha.
+  const uncited = (text: string) =>
+    text
+      .replace(/\s*\(#\d+(?:\s*[,e]\s*#\d+)*\)/g, "")
+      .replace(/\s*#\d+\b/g, "")
+      .trim()
+  const topics = (items: string[]) =>
+    items.map(uncited).filter((item) => item && short(item, MAX_PITACO_TOPIC_CHARS))
+  const asked = unansweredSellerQuestion(conversation)
+
+  return limitPitaco({
+    ...pitaco,
+    points: pitaco.points
+      .map(anchored)
+      .filter((point) => point !== null)
+      .map((point) => (short(point.hint, MAX_PITACO_HINT_CHARS) ? point : { ...point, hint: "" })),
+    questions: pitaco.questions
+      .map(anchored)
+      .filter((question) => question !== null)
+      .filter((question) => question.text.trim() && short(question.text, MAX_PITACO_QUESTION_CHARS)),
+    doNow: topics(pitaco.doNow),
+    avoid: topics(pitaco.avoid),
+    // Marcador de preenchimento ("[valor]") ou nome genérico ("Fulano") seria um dado a inventar na
+    // hora de enviar.
+    replies: pitaco.replies
+      .map(uncited)
+      .filter(
+        (reply) =>
+          reply &&
+          reply.length <= MAX_PITACO_REPLY_CHARS &&
+          !/\[[^\]]*\]/.test(reply) &&
+          !/\b(fulan|ciclan|beltran)[oa]\b/i.test(reply) &&
+          // Repetir a pergunta que o vendedor acabou de fazer, antes de o cliente responder.
+          !(asked && repeatsQuestion(reply, asked))
+      )
+  })
+}
+
 export const reviewDraft =(conversation: ChatMessage[], draft: string) =>
   run(config.review, async (ctx) => {
     if (!draft.trim()) throw new Error("Digite uma mensagem antes de pedir a revisão.")
@@ -206,6 +303,27 @@ export const coachConversation = (conversation: ChatMessage[], stream: StreamOpt
     return limitCoaching(
       dropInvalidImprovements(parseModelJson(raw, coachingReportSchema), conversation)
     )
+  })
+
+/**
+ * Pitaco: orientação SPIN sobre a conversa inteira (com as transcrições já anexadas pelo content
+ * script). Basta haver mensagem do cliente ou do vendedor — só cliente vira descoberta, só vendedor
+ * vira abertura. Sem nenhuma das duas não há o que orientar, e a IA não é chamada.
+ */
+export const generatePitaco = (conversation: ChatMessage[]) =>
+  run(config.pitaco, async (ctx): Promise<Pitaco> => {
+    if (!config.pitaco.enabled) throw new Error("O Pitaco está desativado nesta build.")
+    if (!conversation.some((m) => m.author === "cliente" || m.author === "vendedor")) {
+      throw new Error("Ainda não há mensagens nesta conversa para dar um Pitaco.")
+    }
+    const raw = await complete(
+      ctx,
+      config.pitaco,
+      buildPitacoPrompt(conversation),
+      pitacoFormat,
+      PITACO_OUTPUT_TOKENS
+    )
+    return sanitizePitaco(parseModelJson(raw, pitacoSchema), conversation)
   })
 
 /**

@@ -9,13 +9,24 @@ import {
   impactLevels,
   MAX_CHANGES,
   MAX_IMPROVEMENTS,
+  MAX_PITACO_AVOID,
+  MAX_PITACO_DO,
+  MAX_PITACO_PATH,
+  MAX_PITACO_POINTS,
+  MAX_PITACO_QUESTIONS,
+  MAX_PITACO_REPLIES,
+  MAX_PITACO_WARNINGS,
   MAX_REPORT_ITEMS,
-  MAX_STRENGTHS
+  MAX_STRENGTHS,
+  pitacoPointKinds,
+  pitacoStages,
+  spinStages,
+  spinStatuses
 } from "./constants"
 
 // Todo o comportamento da IA é definido neste arquivo. Ao alterar qualquer texto abaixo, incremente
 // PROMPT_VERSION — ele aparece na UI e ajuda a comparar resultados entre versões.
-export const PROMPT_VERSION = "2026-10-07.1"
+export const PROMPT_VERSION = "2026-10-20.7"
 
 export const SYSTEM_BASE = `
 Você é o Drummond by BW, assistente de revisão de mensagens da equipe comercial da ${COMPANY_NAME}.
@@ -54,7 +65,10 @@ ${COMPANY_CONTEXT}
   nome de um arquivo. Quando o cliente enviar um áudio, não critique o vendedor por não ter
   respondido a algo que você não pode conhecer. Se o vendedor enviou um áudio ou anexo depois de
   uma pergunta do cliente, considere que ela pode ter sido respondida ali: não a trate como
-  ignorada nem diga que ficou sem resposta.
+  ignorada nem diga que ficou sem resposta. Para áudio, estas regras valem quando ele aparece como
+  o marcador [áudio], ou seja, quando não pôde ser transcrito.
+- Áudios transcritos: as mensagens enviadas em áudio chegam aqui já transcritas, como texto comum,
+  e valem como se tivessem sido escritas.
 - Mensagens do vendedor podem ter sido escritas a partir de sugestões desta ferramenta. Avalie o
   texto como ele está, sem tratá-lo como erro por isso.
 
@@ -276,6 +290,150 @@ melhorar, sem elogio vazio e sem cobrança genérica.
 - pendencias: até ${MAX_REPORT_ITEMS} pendências para amanhã, por conversa quando possível.
 `.trim()
 
+const quoted = (values: readonly string[]) => values.map((v) => `"${v}"`).join(" | ")
+
+export const TASK_PITACO = `
+## Tarefa: Pitaco de condução (SPIN Selling)
+Você recebe uma <conversa> entre vendedor e cliente e dá ao vendedor um "pitaco": onde a conversa
+está, qual caminho seguir, quais pontos abordar, quais perguntas fazer e, no fim, conselhos do que
+fazer e do que não fazer agora, com sugestões de resposta. Você ajuda o vendedor a PENSAR a próxima
+jogada; a decisão do que enviar é dele.
+
+## Mensagem pronta só em "replies"
+"replies" é o único campo com mensagens prontas para o vendedor enviar. Nos demais não há mensagem
+para o cliente: nada de saudação, parágrafo para copiar ou resposta completa. "hint" é direção de
+raciocínio (ex.: "entender quem mais participa da decisão"), não frase para o cliente, e cada item
+de "questions" é uma pergunta curta — uma frase só, sem saudação nem contexto em volta.
+
+## O método SPIN
+- situacao: fatos do contexto do cliente (como faz hoje, para que precisa, quem participa).
+- problema: dificuldades, insatisfações e dores que o cliente reconhece.
+- implicacao: consequências do problema (custo, tempo, risco, o que piora se nada mudar).
+- necessidade: o próprio cliente dizendo o valor de resolver (o que ganharia, por que importa).
+Status de cada etapa: "coberta" quando o cliente já respondeu o essencial; "parcial" quando o
+assunto apareceu de forma vaga ou sem confirmação; "pendente" quando não foi abordado.
+"stageNow" é a etapa em que a conversa está agora; use "abertura" quando a descoberta ainda não
+começou (ex.: só houve saudação ou mensagens automáticas).
+
+## Qualificação (BANT)
+Avalie também o que a conversa já mostra de cada critério:
+- budget (Orçamento): verba ou recursos para investir.
+- authority (Autoridade): se quem conversa decide a compra ou quem mais decide.
+- need (Necessidade): um problema real que o produto ou serviço resolve.
+- timing (Prazo): prazo ou urgência para decidir.
+Status: "cumprido" (ficou claro na conversa, ou o contexto deixa evidente, como pessoa física
+comprando para si), "parcial" (apareceu vago ou sem confirmação) ou "pendente" (não abordado).
+
+## Resumo: Fazer, Não fazer e Sugestões de respostas
+"doNow", "avoid" e "replies" são a primeira (e muitas vezes a única) coisa que o vendedor lê; o
+resto só aparece se ele abrir a análise completa. Escreva-os por último, como síntese de tudo o que
+você avaliou: etapas do SPIN, critérios do BANT em aberto, pergunta do cliente pendente e
+"warnings".
+
+doNow e avoid são CONSELHOS de um colega experiente, não ordens: cada item diz o que fazer e por
+quê (ou como), ancorado no que o cliente disse. Fale com o vendedor na segunda pessoa, de forma
+gentil ("Tente…", "Vale…", "Procure…", "Evite…"), nunca com verbo no infinitivo seco nem em forma de
+lista de tarefas.
+- doNow: até ${MAX_PITACO_DO} conselhos, do mais para o menos urgente; o primeiro é o próximo
+  movimento. Se há fato a confirmar em "warnings", um conselho é confirmá-lo antes de falar. Se a
+  decisão depende de outra pessoa, um conselho é entender ou envolver quem decide. Quando o assunto
+  é delicado (dívida, medo, objeção), diga também como abordar (com calma, sem julgar…).
+- avoid: até ${MAX_PITACO_AVOID} coisas que atrapalhariam esta conversa agora, com o motivo. Comece
+  cada item com "Evite" (nunca com "Não"). O que o vendedor PRECISA fazer (responder, envolver,
+  acolher) vai para doNow, nunca para avoid como "evite ignorar…" ou "evite deixar de…".
+- Cada conselho em uma ou duas frases curtas, até 25 palavras, em linguagem simples: sem nomes de
+  método nem de etapas (SPIN, BANT, Situação, Implicação…) e sem citar mensagens (#n).
+
+replies: de 1 a ${MAX_PITACO_REPLIES} mensagens prontas que o vendedor pode enviar por texto ou falar
+num áudio, como próxima mensagem desta conversa. Cada uma é uma alternativa completa (não partes de
+uma mesma mensagem), segue o primeiro conselho de doNow e respeita o avoid.
+- Tom de voz esperado; natural para ler em voz alta: 1 a 3 frases, sem listas e sem emoji.
+- Use o primeiro nome do cliente só se ele aparece na conversa; senão, "você". Nunca invente nome
+  nem use nome genérico (Fulano, Cliente).
+- Termine, quando fizer sentido, com uma pergunta aberta que leve a conversa adiante.
+- Pergunta direta do cliente pendente: a resposta a acolhe e, se depende de fato que você não
+  conhece, diz que o vendedor vai verificar e retornar, sem inventar o dado.
+- Nada de fatos novos (preços, prazos, condições, características do produto) e nada de marcadores
+  de preenchimento entre colchetes.
+
+## Como ler a conversa para o Pitaco
+- Use a conversa inteira, não só as últimas mensagens.
+- Só VENDEDOR sem "(modelo)" é texto livre do vendedor; modelos, BOT e SISTEMA são contexto.
+- Conversa só com o cliente (o vendedor ainda não escreveu): oriente a descoberta a partir do que o
+  cliente trouxe. Conversa só com o vendedor (o cliente ainda não respondeu): oriente a abertura e o
+  que perguntar primeiro, sem supor nada sobre o cliente.
+- <vez> diz de quem é a vez de falar. Quando a vez é do CLIENTE (o vendedor falou por último e
+  ainda não teve resposta), o primeiro conselho é aguardar a resposta (ou retomar com leveza se ele
+  demorar), sem repetir a pergunta que o vendedor acabou de fazer, e o que o cliente disse antes
+  dela já foi respondido pelo vendedor. Nesse caso, "replies" são mensagens de retomada para quando
+  o cliente demorar: não repetem a última mensagem do vendedor nem respondem de novo ao que o
+  cliente disse antes dela.
+
+## Regras do Pitaco
+1. Não repita perguntas já respondidas: antes de sugerir uma pergunta, confira se o cliente já deu
+   essa informação (inclusive em áudio transcrito). Se ficou vago, a pergunta aprofunda, não repete.
+2. Siga a ordem do SPIN: não sugira apresentar solução, produto, proposta ou preço antes de a
+   Necessidade estar ao menos "parcial". Mas pergunta direta do cliente (ex.: preço) nunca fica
+   sem resposta: oriente a acolhê-la e combinar o retorno (ex.: dizer que vai passar os valores e
+   que, para indicar o melhor plano, precisa entender o uso), em vez de ignorá-la ou adiá-la sem
+   explicação. Nunca coloque "não responder" a pergunta do cliente em "avoid".
+3. Objeção (preço, prazo, "vou pensar", concorrente): primeiro acolher com empatia e entender o
+   motivo; nunca rebater, pressionar ou criar urgência falsa.
+4. Ancore tudo na conversa: "evidence" lista os números [n] das mensagens que sustentam cada ponto
+   e cada pergunta, e "evidence" das etapas cita #n. Não cite mensagem que não existe. Lista vazia só
+   quando o item vem justamente da falta de informação na conversa.
+5. Não invente fatos da empresa (preços, prazos, condições, características do produto). O que o
+   vendedor precisa confirmar antes de falar vai para "warnings".
+6. Seja específico desta conversa: nada de conselho genérico de vendas.
+
+## Formato da resposta (JSON)
+{
+  "stages": {
+    ${spinStages.map((s) => `"${s}"`).join(" | ")}: {
+      "status": ${quoted(spinStatuses)},
+      "evidence": string
+    }
+  },
+  "bant": {
+    "budget" | "authority" | "need" | "timing": {
+      "status": ${quoted(bantStatuses)},
+      "evidence": string
+    }
+  },
+  "stageNow": ${quoted(pitacoStages)},
+  "diagnosis": string,
+  "path": [string],
+  "points": [{
+    "stage": ${quoted(spinStages)},
+    "kind": ${quoted(pitacoPointKinds)},
+    "title": string,
+    "why": string,
+    "hint": string,
+    "evidence": [number]
+  }],
+  "questions": [{ "stage": ${quoted(spinStages)}, "text": string, "evidence": [number] }],
+  "warnings": [string],
+  "doNow": [string],
+  "avoid": [string],
+  "replies": [string]
+}
+- stages: as quatro etapas, sempre presentes; evidence em até 20 palavras, citando #n.
+- bant: os quatro critérios, sempre presentes; evidence em até 15 palavras, citando #n quando houver.
+- diagnosis: 1–2 frases sobre onde a conversa está e o que falta para avançar.
+- path: até ${MAX_PITACO_PATH} passos, em ordem, como ações curtas do vendedor (ex.: "Entender como
+  o cliente resolve isso hoje").
+- points: até ${MAX_PITACO_POINTS} pontos, do mais para o menos importante. kind: "descobrir" (algo
+  novo), "aprofundar" (o que o cliente já disse), "confirmar" (um entendimento), "objecao" (tratar
+  uma objeção) ou "avancar" (próximo passo). title em até 8 palavras; why ancorado na conversa; hint
+  em até 20 palavras.
+- questions: até ${MAX_PITACO_QUESTIONS} perguntas abertas (não de sim/não), curtas, uma frase cada,
+  ainda não respondidas na conversa. Sem vocativo: não comece nem termine com o nome do cliente
+  (escreva "O que te faz…?", não "Fulano, o que te faz…?").
+- warnings: até ${MAX_PITACO_WARNINGS} fatos a confirmar antes de falar; vazio se não houver.
+- doNow, avoid e replies: o resumo descrito em "Resumo: Fazer, Não fazer e Sugestões de respostas",
+  específico desta conversa.
+`.trim()
+
 const AUTHOR_LABEL: Record<ChatMessage["author"], string> = {
   cliente: "CLIENTE",
   vendedor: "VENDEDOR",
@@ -291,9 +449,17 @@ export const formatConversation = (messages: ChatMessage[]) => {
   if (messages.length === 0) return "(sem mensagens anteriores visíveis)"
   return messages
     .map((m) => {
+      // Áudio transcrito vira texto comum, sem rótulo: qualquer menção a áudio na linha ("[áudio]
+      // (transcrição: …)" ou "CLIENTE (áudio transcrito)") fazia o modelo desconfiar do conteúdo e
+      // pedir para confirmar respostas que já estavam certas (`pnpm bench:audio`, caso R3: 0/5 e
+      // ~60%, contra 10/10 assim). Sem transcrição fica o marcador `[áudio]`, que o modelo não pode
+      // interpretar. O coaching não vira melhoria sobre o áudio do vendedor porque o `text` dele
+      // continua sendo o marcador (ver `dropInvalidImprovements`).
+      const transcribed = !!m.transcript?.trim()
       const label = AUTHOR_LABEL[m.author] + (m.template ? " (modelo)" : "")
       const time = m.time ? ` ${m.time}` : ""
-      return `[${m.id}] ${label}${time}: ${neutralizeTags(m.text.trim())}`
+      const content = transcribed ? m.transcript!.trim() : m.text.trim()
+      return `[${m.id}] ${label}${time}: ${neutralizeTags(content)}`
     })
     .join("\n")
 }
@@ -323,6 +489,25 @@ export const buildReviewPrompt = (
 export const buildCoachPrompt = (conversation: ChatMessage[]): PromptMessages => ({
   system: `${SYSTEM_BASE}\n\n${TASK_COACH}`,
   user: ["<conversa>", formatConversation(conversation), "</conversa>"].join("\n")
+})
+
+// O Pitaco olha a conversa inteira que o content script mandou (já com as transcrições em cache).
+/**
+ * De quem é a vez de falar, calculado aqui e não deixado ao modelo: numa conversa longa ele se
+ * prende à última fala do cliente e manda responder de novo ao que o vendedor já respondeu
+ * (`pnpm bench:pitaco`, caso P6: 1/5 só com a regra no prompt).
+ */
+const turnOf = (conversation: ChatMessage[]) => {
+  const last = conversation.findLast((m) => m.author === "cliente" || (m.author === "vendedor" && !m.template))
+  if (!last) return "Ninguém falou ainda: a vez é do VENDEDOR, para abrir a conversa."
+  return last.author === "vendedor"
+    ? `CLIENTE: a última mensagem é do vendedor ([${last.id}]) e o cliente ainda não respondeu.`
+    : `VENDEDOR: a última mensagem é do cliente ([${last.id}]) e o vendedor ainda não respondeu.`
+}
+
+export const buildPitacoPrompt = (conversation: ChatMessage[]): PromptMessages => ({
+  system: `${SYSTEM_BASE}\n\n${TASK_PITACO}`,
+  user: ["<conversa>", formatConversation(conversation), "</conversa>", "", `<vez>${turnOf(conversation)}</vez>`].join("\n")
 })
 
 // O relatório reaproveita o SYSTEM_BASE e recebe o dia já delimitado por `formatReportInput`
