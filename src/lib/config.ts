@@ -102,7 +102,6 @@ const report: ModelConfig = {
 export interface SttConfig {
   enabled: boolean
   model: string
-  providerOrder?: string[]
   timeoutMs: number
   /** Teto de tamanho por áudio; acima disso a mensagem fica sem transcrição. */
   maxBytes: number
@@ -113,9 +112,6 @@ export interface SttConfig {
 const stt: SttConfig = {
   enabled: process.env.PLASMO_PUBLIC_STT !== "off",
   model: process.env.PLASMO_PUBLIC_STT_MODEL || "openai/whisper-large-v3-turbo",
-  providerOrder: toProviderOrder(
-    process.env.PLASMO_PUBLIC_STT_PROVIDER_ORDER ?? "deepinfra,groq"
-  ),
   timeoutMs: toNumber(process.env.PLASMO_PUBLIC_STT_TIMEOUT_MS) ?? 60_000,
   maxBytes: toNumber(process.env.PLASMO_PUBLIC_STT_MAX_BYTES) ?? 10 * 1024 * 1024,
   dailyLimit: Math.max(1, Math.floor(toNumber(process.env.PLASMO_PUBLIC_STT_DAILY_LIMIT) ?? 1000))

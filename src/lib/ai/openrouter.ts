@@ -5,6 +5,7 @@ import type { PromptMessages } from "./prompts"
 import type { toResponseFormat } from "./schemas"
 
 const ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
+const TRANSCRIPTIONS_ENDPOINT = "https://openrouter.ai/api/v1/audio/transcriptions"
 const MODELS_API = "https://openrouter.ai/api/v1/models"
 
 // Lida só aqui para ficar apenas no bundle do background (ver comentário em lib/config.ts).
@@ -118,9 +119,19 @@ const readErrorDetail = async (response: Response) => {
 const providerError = (body: any, effective: EffectiveCost | null = null) =>
   new OpenRouterError(`Erro do provedor: ${body.error.message ?? "desconhecido"}`, undefined, effective)
 
-const STT_PROMPT =
-  "Transcreva fielmente o áudio a seguir em português do Brasil. Devolva apenas a transcrição, " +
-  "sem comentários, resumo ou aspas. Se algum trecho estiver inaudível, escreva [inaudível]."
+// A resposta de `/audio/transcriptions` traz `usage` próprio (segundos, tokens de entrada/saída e
+// custo), diferente do `usage` do chat.
+const toTranscriptionEffective = (body: any): EffectiveCost | null => {
+  const usage = body?.usage
+  if (!usage) return null
+  return {
+    usd: typeof usage.cost === "number" ? usage.cost : null,
+    inputTokens: usage.input_tokens ?? 0,
+    outputTokens: usage.output_tokens ?? 0,
+    reasoningTokens: 0,
+    provider: typeof body.provider === "string" ? body.provider : undefined
+  }
+}
 
 const describeTranscriptionError = (status: number, detail: string) => {
   switch (status) {
@@ -151,9 +162,9 @@ export interface TranscriptionResult {
 }
 
 /**
- * Transcreve um áudio no Whisper via OpenRouter. É uma chamada separada das tarefas de JSON: o
- * modelo `audio->transcription` não aceita `response_format`, temperatura, raciocínio nem
- * `require_parameters` — o provedor é escolhido pela ordem configurada e pela política de dados.
+ * Transcreve um áudio no Whisper via OpenRouter. O modelo `audio->transcription` é recusado no
+ * `chat/completions`: a chamada vai para `/audio/transcriptions`, que aceita só a política de
+ * dados em `provider` (a ordem de provedores não se aplica) e não recebe prompt.
  */
 export const transcribeAudio = async ({
   audioBase64,
@@ -173,7 +184,7 @@ export const transcribeAudio = async ({
   const timeout = setTimeout(() => controller.abort(), config.stt.timeoutMs)
 
   try {
-    const response = await fetch(ENDPOINT, {
+    const response = await fetch(TRANSCRIPTIONS_ENDPOINT, {
       method: "POST",
       signal: controller.signal,
       headers: {
@@ -183,19 +194,9 @@ export const transcribeAudio = async ({
       },
       body: JSON.stringify({
         model: config.stt.model,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: STT_PROMPT },
-              { type: "input_audio", input_audio: { data: audioBase64, format } }
-            ]
-          }
-        ],
-        provider: {
-          ...(config.stt.providerOrder && { order: config.stt.providerOrder }),
-          ...(config.denyDataCollection && { data_collection: "deny" })
-        }
+        input_audio: { data: audioBase64, format },
+        language: "pt",
+        ...(config.denyDataCollection && { provider: { data_collection: "deny" } })
       })
     })
 
@@ -208,11 +209,11 @@ export const transcribeAudio = async ({
 
     const body = await response.json()
     if (body?.error) throw providerError(body)
-    const content = body?.choices?.[0]?.message?.content
-    if (typeof content !== "string" || !content.trim()) {
-      throw new OpenRouterError("A transcrição veio vazia. Tente novamente.", undefined, toEffective(body))
+    const text = body?.text
+    if (typeof text !== "string" || !text.trim()) {
+      throw new OpenRouterError("A transcrição veio vazia. Tente novamente.", undefined, toTranscriptionEffective(body))
     }
-    return { text: content.trim(), effective: toEffective(body) }
+    return { text: text.trim(), effective: toTranscriptionEffective(body) }
   } catch (error) {
     if (error instanceof OpenRouterError) throw error
     if (error instanceof DOMException && error.name === "AbortError") {

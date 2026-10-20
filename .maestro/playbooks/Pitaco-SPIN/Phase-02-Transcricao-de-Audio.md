@@ -42,12 +42,12 @@ repetir a chamada.
 - [x] Configurar a tarefa `stt` em `src/lib/config.ts` e `.env.example`:
   - `PLASMO_PUBLIC_STT=on|off`;
   - `PLASMO_PUBLIC_STT_MODEL=openai/whisper-large-v3-turbo`;
-  - `PLASMO_PUBLIC_STT_PROVIDER_ORDER=deepinfra,groq`;
   - `PLASMO_PUBLIC_STT_TIMEOUT_MS=60000`;
   - `PLASMO_PUBLIC_STT_MAX_BYTES=10485760`;
   - `PLASMO_PUBLIC_STT_DAILY_LIMIT=1000` (teto diário por instalação).
-- [x] Estender `src/lib/ai/openrouter.ts` para uma chamada de transcrição com conteúdo
-  `input_audio`, sem `response_format` e sem `require_parameters`.
+- [x] Estender `src/lib/ai/openrouter.ts` para uma chamada de transcrição em
+  `/api/v1/audio/transcriptions` (`input_audio` + `language: "pt"`; só `data_collection` em
+  `provider` — a ordem de provedores não se aplica a esse endpoint).
 - [x] Criar `src/background/messages/transcribe-audio.ts`:
   - recebe `conversationKey`, `messageKey`, bytes e mime;
   - confere o cache antes de chamar o provedor;
@@ -108,6 +108,14 @@ repetir a chamada.
 > última execução, então falta confirmar o casamento `[data-message-id]` × índice da API e o
 > status do GET dentro do content script. Próximo passo: instrumentar `loadBotconversaMedia`
 > (`want`/`keys`/`hit`) e `downloadBotconversaAudio` (status/tamanho), rodar uma vez e remover.
+>
+> **E2E fechado (20/10/2026):** a instrumentação mostrou que a mídia já estava certa (casamento
+> `message_id` × `[data-message-id]` ok, `get_media_url` 200 `audio/ogg`); quem recusava era o
+> OpenRouter: o Whisper não é aceito no `chat/completions`. A transcrição passou para
+> `/api/v1/audio/transcriptions` (resposta `text` + `usage.cost`) e `STT_PROVIDER_ORDER` saiu da
+> config (o endpoint ignora `order`). No app real: **2/2 áudios transcritos** (0,7 s e 5,2 s,
+> ~US$ 0,00016 no total) e, na segunda execução, `missing: []` — nenhuma chamada repetida.
+> Logs removidos; **453 testes**, typecheck, build e `check:bundle` (41/41 produção, 40/40 dev) ok.
 
 ## Critérios de aceite
 

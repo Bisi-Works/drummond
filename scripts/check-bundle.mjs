@@ -141,13 +141,12 @@ const fetchStub = async (url, init) => {
     return new Response(JSON.stringify({ data: { endpoints: [endpoint] } }))
   }
   const body = JSON.parse(init.body)
-  // Transcrição (Whisper): a requisição tem conteúdo multimodal e não usa response_format.
-  if (body?.model === "openai/whisper-large-v3-turbo") {
-    sttRequests.push(body)
+  // Transcrição (Whisper): endpoint próprio, com `text` e `usage` no formato de áudio.
+  if (url.endsWith("/api/v1/audio/transcriptions")) {
+    sttRequests.push({ url, body })
     return new Response(JSON.stringify({
-      provider: "DeepInfra",
-      usage: { prompt_tokens: 200, completion_tokens: 20, cost: 0.00001 },
-      choices: [{ message: { content: "Transcrição do áudio." } }]
+      text: "Transcrição do áudio.",
+      usage: { seconds: 9.2, input_tokens: 200, output_tokens: 20, total_tokens: 220, cost: 0.00001 }
     }))
   }
   requests.push(body)
@@ -246,8 +245,8 @@ try {
   check(decision?.body.state.conversa.length === 2 && decision.body.questions.reply.type === "choice",
     "classify-closing: estado com a mensagem anterior do vendedor e pergunta Choice")
 
-  // Transcrição de áudio (Whisper): rota própria no background, com input_audio e sem parâmetros
-  // que o modelo audio->transcription não aceita.
+  // Transcrição de áudio (Whisper): rota própria no background, no endpoint de transcrição (o
+  // `chat/completions` recusa modelos audio->transcription).
   const transcription = await deliver(listeners, {
     name: "transcribe-audio",
     body: {
@@ -263,18 +262,16 @@ try {
     transcription?.ok === true && transcription.text === "Transcrição do áudio.",
     `transcribe-audio responde (${transcription?.ok ? "ok" : transcription?.error})`
   )
-  const sttRequest = sttRequests[0]
+  const sttRequest = sttRequests[0]?.body
   check(
     sttRequest?.model === "openai/whisper-large-v3-turbo" &&
-      sttRequest?.response_format === undefined &&
-      sttRequest?.provider?.require_parameters === undefined &&
+      sttRequest?.messages === undefined &&
       sttRequest?.provider?.data_collection === "deny",
-    `transcrição usa o Whisper, sem response_format/require_parameters e com política de dados (${sttRequest?.provider?.order?.join(" → ") ?? "provedor padrão"})`
+    `transcrição usa o Whisper no endpoint de áudio, com política de dados (${sttRequests[0]?.url ?? "sem chamada"})`
   )
   check(
-    Array.isArray(sttRequest?.messages?.[0]?.content) &&
-      sttRequest.messages[0].content.some((part) => part?.type === "input_audio"),
-    "transcrição envia input_audio em base64"
+    sttRequest?.input_audio?.data === "AAAA" && sttRequest.input_audio.format === "ogg" && sttRequest.language === "pt",
+    "transcrição envia input_audio em base64 e idioma pt"
   )
   if (isDevBuild) {
     check(
