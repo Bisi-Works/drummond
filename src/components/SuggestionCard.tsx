@@ -1,5 +1,6 @@
 import type { ReviewDraftResponse } from "~background/messages/review-draft"
 import { CHANGE_LABEL } from "~lib/labels"
+import { describeAudio, type AudioSummary } from "~lib/transcripts/prepare"
 
 import { Wordmark } from "./Brand"
 import { DiffView } from "./DiffView"
@@ -9,7 +10,8 @@ import { Spinner } from "./Spinner"
 export type ReviewState =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "done"; draft: string; response: ReviewDraftResponse }
+  /** `audio`: áudios do contexto enviado à IA, com e sem transcrição. */
+  | { kind: "done"; draft: string; response: ReviewDraftResponse; audio?: AudioSummary }
 
 interface Props {
   state: Exclude<ReviewState, { kind: "idle" }>
@@ -60,6 +62,7 @@ export const SuggestionCard = ({
           currentDraft={currentDraft}
           applyError={applyError}
           response={state.response}
+          audio={state.audio}
           onApply={onApply}
           onCopy={onCopy}
           onRetry={onRetry}
@@ -74,6 +77,7 @@ const ReviewBody = ({
   currentDraft,
   applyError,
   response,
+  audio,
   onApply,
   onCopy,
   onRetry
@@ -82,6 +86,7 @@ const ReviewBody = ({
   currentDraft: string
   applyError?: string | null
   response: ReviewDraftResponse
+  audio?: AudioSummary
   onApply: (text: string) => void
   onCopy: (text: string) => void
   onRetry: () => void
@@ -172,6 +177,9 @@ const ReviewBody = ({
         )}
       </div>
 
+      {audio && describeAudio(audio) && (
+        <p className="text-[11px] text-fg-subtle">Contexto da revisão {describeAudio(audio)}.</p>
+      )}
       <MetaFooter meta={response.meta} />
     </>
   )

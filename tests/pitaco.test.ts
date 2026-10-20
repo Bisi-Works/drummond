@@ -124,7 +124,7 @@ describe("buildPitacoPrompt", () => {
     const prompt = buildPitacoPrompt(conversation)
     expect(prompt.system).toBe(`${SYSTEM_BASE}\n\n${TASK_PITACO}`)
     expect(prompt.user.startsWith("<conversa>\n[1] CLIENTE")).toBe(true)
-    expect(prompt.user).toContain('[3] CLIENTE: [áudio] (transcrição: "Uso para trabalhar')
+    expect(prompt.user).toContain("[3] CLIENTE: Uso para trabalhar com aplicativo")
     expect(prompt.user).toContain("[4] CLIENTE: Quanto fica a parcela?")
   })
 
@@ -135,7 +135,8 @@ describe("buildPitacoPrompt", () => {
     expect(TASK_PITACO).toContain("pergunta direta do cliente (ex.: preço) nunca fica")
     expect(TASK_PITACO).toContain("acolher com empatia")
     expect(TASK_PITACO).toContain("números [n]")
-    expect(TASK_PITACO).toContain("trate a transcrição como o que foi dito")
+    // A regra do áudio transcrito é geral (SYSTEM_BASE): a tarefa só lembra de não repetir perguntas.
+    expect(TASK_PITACO).toContain("inclusive em áudio transcrito")
     for (const value of ["situacao", "problema", "implicacao", "necessidade", "abertura"]) {
       expect(TASK_PITACO).toContain(`"${value}"`)
     }

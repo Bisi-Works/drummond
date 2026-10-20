@@ -3,6 +3,7 @@ import type { CostInfo } from "~lib/ai/cost"
 import type { CoachingReport, DailyReport, Pitaco } from "~lib/ai/schemas"
 import type { AiResult } from "~lib/ai/service"
 import type { DailyReportInput } from "~lib/tracking/report"
+import type { AudioSummary } from "~lib/transcripts/prepare"
 
 // Mensagem enviada do side panel para o content script da aba ativa. As mensagens para o
 // background ficam em src/background/messages (convenção do @plasmohq/messaging).
@@ -11,7 +12,10 @@ export const GET_CONVERSATION = "get-conversation"
 export interface GetConversationResponse {
   platform: string
   conversationKey: string | null
+  /** Já com as transcrições em cache ou feitas agora (ver `prepareConversation`). */
   conversation: ChatMessage[]
+  /** Áudios da conversa, com e sem transcrição. */
+  audio?: AudioSummary
 }
 
 // O coaching usa uma conexão (`chrome.runtime.connect`) em vez de uma mensagem: o background

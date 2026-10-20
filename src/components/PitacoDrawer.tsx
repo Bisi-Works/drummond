@@ -4,6 +4,7 @@ import type { PitacoState } from "~hooks/usePitaco"
 import { spinStages, type SpinStage } from "~lib/ai/constants"
 import type { Pitaco } from "~lib/ai/schemas"
 import { PITACO_KIND_LABEL, SPIN_LABEL, SPIN_STATUS_STYLE } from "~lib/labels"
+import { describeAudio } from "~lib/transcripts/prepare"
 
 import { LogoMark } from "./Brand"
 import { CostPanel } from "./CostPanel"
@@ -220,8 +221,6 @@ const progressText = (state: PitacoState) => {
   }
 }
 
-const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
-
 const generatedAt = (at: number) =>
   new Date(at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
 
@@ -312,13 +311,7 @@ export const PitacoDrawer = ({ state, contactName, onRefresh, onClose }: Props) 
           <div className="flex items-center justify-between gap-3">
             <p className="min-w-0 text-[11px] text-fg-subtle">
               {state.kind === "done" ? (
-                <>
-                  Gerado às {generatedAt(state.at)}
-                  {state.audio.transcribed > 0 &&
-                    ` · inclui ${plural(state.audio.transcribed, "áudio transcrito", "áudios transcritos")}`}
-                  {state.audio.missing > 0 &&
-                    ` · ${plural(state.audio.missing, "áudio não transcrito", "áudios não transcritos")}`}
-                </>
+                [`Gerado às ${generatedAt(state.at)}`, describeAudio(state.audio)].filter(Boolean).join(" · ")
               ) : (
                 "Nada para analisar ainda."
               )}

@@ -20,6 +20,7 @@ import { GET_CONVERSATION, type GetConversationResponse } from "~lib/messages"
 import { reviewSignal } from "~lib/tracking/signals"
 import { recordReview } from "~lib/tracking/store"
 import { prepareConversation } from "~lib/transcripts/ensure"
+import { audioSummary, type AudioSummary } from "~lib/transcripts/prepare"
 
 // Precisa listar os mesmos domínios que os `hosts` dos adapters (o Plasmo lê este objeto estaticamente).
 export const config: PlasmoCSConfig = {
@@ -36,15 +37,28 @@ export const getStyle: PlasmoGetStyle = () => {
 const adapter = getAdapter(location.hostname)
 if (adapter) registerBrandFont()
 
-// Responde ao side panel com a conversa aberta. Listener síncrono: só responde ao próprio nome.
+// Responde ao side panel com a conversa aberta, já com as transcrições: o coaching usa o mesmo cache
+// do Revisar e do Pitaco (um áudio só é transcrito uma vez). Se a preparação falhar, a conversa vai
+// sem transcrição, com o marcador `[áudio]`. Só responde ao próprio nome; `true` mantém o canal
+// aberto até a resposta assíncrona.
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.name !== GET_CONVERSATION || !adapter) return
-  const response: GetConversationResponse = {
-    platform: adapter.id,
-    conversationKey: adapter.getConversationKey(),
-    conversation: adapter.readConversation(appConfig.coachMessages)
-  }
-  sendResponse(response)
+  const conversationKey = adapter.getConversationKey()
+  const raw = adapter.readConversation(appConfig.coachMessages)
+  const reply = (conversation: typeof raw) =>
+    sendResponse({
+      platform: adapter.id,
+      conversationKey,
+      conversation,
+      audio: audioSummary(conversation)
+    } satisfies GetConversationResponse)
+
+  if (!conversationKey) return void reply(raw)
+  prepareConversation(adapter, raw, conversationKey).then(
+    (prepared) => reply(prepared.conversation),
+    () => reply(raw)
+  )
+  return true
 })
 
 const CARD_MAX_WIDTH = 440
@@ -141,21 +155,25 @@ const Companion = () => {
     setReview({ kind: "loading" })
     setApplyError(null)
     let response: ReviewDraftResponse
+    let audio: AudioSummary | undefined
     try {
       // A revisão também enxerga o conteúdo dos áudios: o cache por mensagem evita transcrever o
       // mesmo áudio de novo em cada clique.
       const rawConversation = adapter.readConversation(appConfig.contextMessages)
       const prepared = key ? await prepareConversation(adapter, rawConversation, key) : null
       if (id !== requestId.current) return
+      const conversation = prepared?.conversation ?? rawConversation
+      // Só o recorte que a revisão de fato manda ao modelo (ver `buildReviewPrompt`).
+      audio = audioSummary(conversation.slice(-appConfig.contextMessages))
       response = await sendToBackground<ReviewDraftRequest, ReviewDraftResponse>({
         name: "review-draft",
-        body: { conversation: prepared?.conversation ?? rawConversation, draft: text }
+        body: { conversation, draft: text }
       })
     } catch {
       // Acontece quando a extensão é recarregada com a página aberta.
       response = failure("A extensão foi atualizada. Recarregue a página do Botconversa.")
     }
-    if (id === requestId.current) setReview({ kind: "done", draft: text, response })
+    if (id === requestId.current) setReview({ kind: "done", draft: text, response, audio })
     // A revisão já foi feita: só se anexa o que a extensão já produziu, sem chamada de IA nova.
     if (response.ok && key) void recordReview(key, reviewSignal(response.data, Date.now()))
   }

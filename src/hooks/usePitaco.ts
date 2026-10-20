@@ -1,17 +1,12 @@
 import { sendToBackground } from "@plasmohq/messaging"
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import type { ChatAdapter, ChatMessage } from "~adapters/types"
+import type { ChatAdapter } from "~adapters/types"
 import { PROMPT_VERSION } from "~lib/ai/prompts"
 import { config } from "~lib/config"
 import { GENERATE_PITACO, type GeneratePitacoRequest, type GeneratePitacoResponse } from "~lib/messages"
 import { prepareConversation } from "~lib/transcripts/ensure"
-
-/** Áudios da conversa enviada ao Pitaco: quantos foram com transcrição e quantos sem. */
-export interface PitacoAudio {
-  transcribed: number
-  missing: number
-}
+import { audioSummary, type AudioSummary } from "~lib/transcripts/prepare"
 
 export type PitacoState =
   | { kind: "idle" }
@@ -20,7 +15,7 @@ export type PitacoState =
   | { kind: "generating" }
   /** A conversa não tem mensagem do cliente nem do vendedor: não há o que orientar. */
   | { kind: "empty" }
-  | { kind: "done"; response: GeneratePitacoResponse; at: number; audio: PitacoAudio }
+  | { kind: "done"; response: GeneratePitacoResponse; at: number; audio: AudioSummary }
 
 // Último Pitaco de cada conversa enquanto a página está aberta: reabrir o drawer mostra o resultado
 // na hora, sem nova chamada paga. O "Atualizar Pitaco" gera de novo.
@@ -31,12 +26,6 @@ const failure = (error: string): GeneratePitacoResponse => ({
   error,
   meta: { model: config.pitaco.model, promptVersion: PROMPT_VERSION, durationMs: 0 }
 })
-
-const audioCount = (conversation: ChatMessage[]): PitacoAudio => {
-  const audios = conversation.filter((m) => m.audio)
-  const transcribed = audios.filter((m) => m.transcript).length
-  return { transcribed, missing: audios.length - transcribed }
-}
 
 /**
  * Estado do drawer do Pitaco. Gera só quando o vendedor pede (`open` sem resultado guardado ou
@@ -89,7 +78,7 @@ export const usePitaco = (adapter: ChatAdapter | null, conversationKey: string |
     }
     if (!current()) return
 
-    const done = { kind: "done" as const, response, at: Date.now(), audio: audioCount(conversation) }
+    const done = { kind: "done" as const, response, at: Date.now(), audio: audioSummary(conversation) }
     if (key && response.ok) lastByConversation.set(key, done)
     setState(done)
   }, [adapter, conversationKey])

@@ -50,3 +50,19 @@ describe("applyTranscripts", () => {
     expect(next[1]).toBe(conversation[1])
   })
 })
+
+describe("audioSummary / describeAudio", () => {
+  it("conta áudios com e sem transcrição e monta o texto do rodapé", async () => {
+    const { audioSummary, describeAudio } = await import("~lib/transcripts/prepare")
+    const summary = audioSummary([
+      { id: 1, author: "cliente", text: "[áudio]", audio: true, transcript: "Oi" },
+      { id: 2, author: "cliente", text: "[áudio]", audio: true },
+      { id: 3, author: "vendedor", text: "[áudio]", audio: true, transcript: "Olá" },
+      { id: 4, author: "cliente", text: "Texto" }
+    ])
+    expect(summary).toEqual({ transcribed: 2, missing: 1 })
+    expect(describeAudio(summary)).toBe("inclui 2 áudios transcritos · 1 áudio não transcrito")
+    expect(describeAudio({ transcribed: 1, missing: 0 })).toBe("inclui 1 áudio transcrito")
+    expect(describeAudio({ transcribed: 0, missing: 0 })).toBe("")
+  })
+})

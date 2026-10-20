@@ -25,6 +25,7 @@ import {
 } from "~lib/messages"
 import { coachingSignal } from "~lib/tracking/signals"
 import { recordCoaching } from "~lib/tracking/store"
+import { describeAudio, type AudioSummary } from "~lib/transcripts/prepare"
 
 registerBrandFont()
 
@@ -34,7 +35,7 @@ type PanelState =
   /** `text`: o JSON do relatório recebido até agora. */
   | { kind: "streaming"; messageCount: number; text: string }
   | { kind: "error"; message: string }
-  | { kind: "done"; messageCount: number; response: CoachResponse }
+  | { kind: "done"; messageCount: number; audio?: AudioSummary; response: CoachResponse }
 
 const readActiveConversation = async (): Promise<GetConversationResponse> => {
   try {
@@ -80,8 +81,9 @@ const SidePanel = () => {
 
   const analyze = async () => {
     try {
-      setState({ kind: "loading", step: "Lendo a conversa…" })
-      const { conversation, conversationKey } = await readActiveConversation()
+      // A leitura já inclui transcrever os áudios que ainda não estão no cache.
+      setState({ kind: "loading", step: "Lendo a conversa e os áudios…" })
+      const { conversation, conversationKey, audio } = await readActiveConversation()
       if (conversation.length === 0) {
         throw new Error("A conversa aberta não tem mensagens visíveis para analisar.")
       }
@@ -93,7 +95,7 @@ const SidePanel = () => {
           prev.kind === "streaming" ? { ...prev, text: prev.text + delta } : prev
         )
       )
-      setState({ kind: "done", messageCount, response })
+      setState({ kind: "done", messageCount, audio, response })
       // A análise já foi feita: só se anexa o sinal à conversa lida, sem chamada de IA nova.
       if (response.ok && conversationKey) {
         void recordCoaching(conversationKey, coachingSignal(response.data, Date.now()))
@@ -169,7 +171,11 @@ const SidePanel = () => {
       {state.kind === "done" && (
         <footer className="space-y-2 border-t border-line px-4 py-2">
           {config.showCosts && state.response.meta.cost && <CostPanel cost={state.response.meta.cost} />}
-          <p className="text-[11px] text-fg-subtle">{state.messageCount} mensagens analisadas</p>
+          <p className="text-[11px] text-fg-subtle">
+            {[`${state.messageCount} mensagens analisadas`, state.audio && describeAudio(state.audio)]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
           <MetaFooter meta={state.response.meta} />
         </footer>
       )}

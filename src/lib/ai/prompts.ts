@@ -24,7 +24,7 @@ import {
 
 // Todo o comportamento da IA é definido neste arquivo. Ao alterar qualquer texto abaixo, incremente
 // PROMPT_VERSION — ele aparece na UI e ajuda a comparar resultados entre versões.
-export const PROMPT_VERSION = "2026-10-20.2"
+export const PROMPT_VERSION = "2026-10-20.4"
 
 export const SYSTEM_BASE = `
 Você é o Drummond by BW, assistente de revisão de mensagens da equipe comercial da ${COMPANY_NAME}.
@@ -63,7 +63,10 @@ ${COMPANY_CONTEXT}
   nome de um arquivo. Quando o cliente enviar um áudio, não critique o vendedor por não ter
   respondido a algo que você não pode conhecer. Se o vendedor enviou um áudio ou anexo depois de
   uma pergunta do cliente, considere que ela pode ter sido respondida ali: não a trate como
-  ignorada nem diga que ficou sem resposta.
+  ignorada nem diga que ficou sem resposta. Para áudio, estas regras valem quando ele aparece como
+  o marcador [áudio], ou seja, quando não pôde ser transcrito.
+- Áudios transcritos: as mensagens enviadas em áudio chegam aqui já transcritas, como texto comum,
+  e valem como se tivessem sido escritas.
 - Mensagens do vendedor podem ter sido escritas a partir de sugestões desta ferramenta. Avalie o
   texto como ele está, sem tratá-lo como erro por isso.
 
@@ -311,9 +314,6 @@ começou (ex.: só houve saudação ou mensagens automáticas).
 
 ## Como ler a conversa para o Pitaco
 - Use a conversa inteira, não só as últimas mensagens.
-- Quando um [áudio] vier acompanhado de (transcrição: "…"), trate a transcrição como o que foi dito
-  naquele áudio e use-a como qualquer outra mensagem. Áudio sem transcrição continua valendo a regra
-  geral: não suponha o que ele diz.
 - Só VENDEDOR sem "(modelo)" é texto livre do vendedor; modelos, BOT e SISTEMA são contexto.
 - Conversa só com o cliente (o vendedor ainda não escreveu): oriente a descoberta a partir do que o
   cliente trouxe. Conversa só com o vendedor (o cliente ainda não respondeu): oriente a abertura e o
@@ -389,12 +389,17 @@ export const formatConversation = (messages: ChatMessage[]) => {
   if (messages.length === 0) return "(sem mensagens anteriores visíveis)"
   return messages
     .map((m) => {
+      // Áudio transcrito vira texto comum, sem rótulo: qualquer menção a áudio na linha ("[áudio]
+      // (transcrição: …)" ou "CLIENTE (áudio transcrito)") fazia o modelo desconfiar do conteúdo e
+      // pedir para confirmar respostas que já estavam certas (`pnpm bench:audio`, caso R3: 0/5 e
+      // ~60%, contra 10/10 assim). Sem transcrição fica o marcador `[áudio]`, que o modelo não pode
+      // interpretar. O coaching não vira melhoria sobre o áudio do vendedor porque o `text` dele
+      // continua sendo o marcador (ver `dropInvalidImprovements`).
+      const transcribed = !!m.transcript?.trim()
       const label = AUTHOR_LABEL[m.author] + (m.template ? " (modelo)" : "")
       const time = m.time ? ` ${m.time}` : ""
-      // A transcrição acompanha o marcador `[áudio]`; sem ela, o modelo continua proibido de
-      // supor o que o áudio dizia.
-      const transcript = m.transcript ? ` (transcrição: "${neutralizeTags(m.transcript)}")` : ""
-      return `[${m.id}] ${label}${time}: ${neutralizeTags(m.text.trim())}${transcript}`
+      const content = transcribed ? m.transcript!.trim() : m.text.trim()
+      return `[${m.id}] ${label}${time}: ${neutralizeTags(content)}`
     })
     .join("\n")
 }

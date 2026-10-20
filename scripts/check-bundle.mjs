@@ -525,7 +525,7 @@ try {
   check(false, `widget executa sem erro: ${error.stack ?? error}`)
 }
 
-// 5a'. Botão e drawer do Pitaco no content script --------------------------------------------------
+// 5a'. Pitaco, Revisar e Coaching com áudio no content script -----------------------------------
 // O fluxo inteiro do clique, com o background simulado: a conversa da fixture ganha um áudio (com
 // `src` na página), o content script baixa e manda transcrever, e o Pitaco recebe a transcrição.
 try {
@@ -544,17 +544,26 @@ try {
 
   const chrome = chromeWithStorage()
   const sent = []
+  const meta = { model: "fake", promptVersion: "x", durationMs: 1000 }
   chrome.runtime.sendMessage = async (_extensionId, message) => {
     sent.push(message)
     if (message?.name === "transcribe-audio") {
+      // Como o background real: grava a transcrição no cache por mensagem antes de responder.
+      const { platform, conversationKey, messageKey } = message.body
+      const key = `drummond.transcript.v1.${platform}.${conversationKey}.${encodeURIComponent(messageKey)}`
+      await chrome.storage.local.set({ [key]: { version: 1, text: "Quero trocar de carro.", at: Date.now(), model: "fake" } })
       return { ok: true, text: "Quero trocar de carro.", meta: { model: "fake", durationMs: 1, cached: false } }
     }
     if (message?.name === "generate-pitaco") {
       const data = { ...fakeModel.pitaco, points: fakeModel.pitaco.points.map((p) => ({ ...p, evidence: [1] })) }
-      return { ok: true, data, meta: { model: "fake", promptVersion: "x", durationMs: 1000 } }
+      return { ok: true, data, meta }
     }
+    if (message?.name === "review-draft") return { ok: true, data: fakeModel.review, meta }
     return undefined
   }
+  // O side panel pede a conversa por aqui (coaching): guarda o listener para simular o pedido.
+  const listeners = []
+  chrome.runtime.onMessage = { addListener: (fn) => listeners.push(fn), removeListener: () => {} }
   window.chrome = chrome
 
   const errors = []
@@ -599,6 +608,25 @@ try {
     closed && !!root.querySelector("aside[role=dialog]") && generations === 1,
     `Esc fecha o drawer e reabrir usa o Pitaco guardado (${generations} geração(ões))`
   )
+
+  // Revisar e Coaching com o mesmo áudio: usam a transcrição do cache, sem novo pedido ao Whisper.
+  const coaching = await deliver(listeners, { name: "get-conversation" })
+  const coachingAudio = coaching?.conversation?.find((m) => m.audio)
+  check(
+    coachingAudio?.transcript === "Quero trocar de carro." && coaching?.audio?.transcribed === 1,
+    `coaching recebe a conversa com a transcrição (${JSON.stringify(coaching?.audio ?? null)})`
+  )
+  button("Revisar")?.click()
+  await new Promise((resolve) => setTimeout(resolve, 400))
+  const review = sent.find((m) => m?.name === "review-draft")
+  const reviewAudio = review?.body?.conversation?.find((m) => m.audio)
+  const transcriptions = sent.filter((m) => m?.name === "transcribe-audio").length
+  check(
+    reviewAudio?.transcript === "Quero trocar de carro." &&
+      (root.textContent ?? "").includes("Contexto da revisão inclui 1 áudio transcrito"),
+    "Revisar envia a transcrição e mostra o áudio transcrito no card"
+  )
+  check(transcriptions === 1, `Pitaco, Coaching e Revisar: um único pedido ao Whisper (${transcriptions})`)
   check(errors.length === 0, `Pitaco executa sem erro${errors.length ? `: ${errors[0]}` : ""}`)
   await window.happyDOM.close()
 } catch (error) {

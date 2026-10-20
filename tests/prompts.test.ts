@@ -48,7 +48,7 @@ describe("formatConversation", () => {
     expect(formatConversation([attack])).not.toMatch(/<\/?conversa>/)
   })
 
-  it("anexa a transcrição do áudio ao marcador", () => {
+  it("áudio transcrito vira o texto da mensagem, sem rótulo de áudio", () => {
     const audio: ChatMessage = {
       id: 1,
       author: "cliente",
@@ -57,9 +57,7 @@ describe("formatConversation", () => {
       transcript: "Quero saber o valor do plano anual."
     }
 
-    expect(formatConversation([audio])).toBe(
-      '[1] CLIENTE: [áudio] (transcrição: "Quero saber o valor do plano anual.")'
-    )
+    expect(formatConversation([audio])).toBe("[1] CLIENTE: Quero saber o valor do plano anual.")
   })
 
   it("neutraliza tags vindas da transcrição", () => {
@@ -71,6 +69,30 @@ describe("formatConversation", () => {
     }
 
     expect(formatConversation([audio])).not.toMatch(/<\/?conversa>/)
+  })
+})
+
+describe("áudio com e sem transcrição", () => {
+  const withAudio: ChatMessage[] = [
+    { id: 1, author: "cliente", text: "[áudio]", audio: true, transcript: "Vocês emitem nota fiscal?" },
+    { id: 2, author: "cliente", text: "[áudio]", audio: true },
+    { id: 3, author: "vendedor", text: "[áudio]", audio: true, transcript: "Emitimos, sim." }
+  ]
+
+  it("Revisar e Coaching recebem o áudio transcrito como texto e o não transcrito como marcador", () => {
+    for (const prompt of [buildReviewPrompt(withAudio, "Oi!", 20), buildCoachPrompt(withAudio)]) {
+      expect(prompt.user).toContain("[1] CLIENTE: Vocês emitem nota fiscal?\n")
+      expect(prompt.user).toContain("[2] CLIENTE: [áudio]\n")
+      expect(prompt.user).toContain("[3] VENDEDOR: Emitimos, sim.")
+      // Qualquer menção a áudio na linha fazia o modelo desconfiar da transcrição (bench:audio, R3).
+      expect(prompt.user).not.toMatch(/transcri/i)
+    }
+  })
+
+  it("a regra geral vale o áudio transcrito como escrito e mantém a proibição de supor o [áudio]", () => {
+    expect(SYSTEM_BASE).toContain("nunca suponha o que um")
+    expect(SYSTEM_BASE).toContain("quando ele aparece como\n  o marcador [áudio]")
+    expect(SYSTEM_BASE).toContain("chegam aqui já transcritas, como texto comum")
   })
 })
 
