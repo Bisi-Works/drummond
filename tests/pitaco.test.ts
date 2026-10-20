@@ -48,8 +48,12 @@ const reply: Pitaco = {
   ],
   questions: [{ stage: "implicacao", text: "Quantos dias o carro ficou parado este mês?", evidence: [3] }],
   warnings: ["Confirme as condições vigentes antes de falar em valores."],
-  doNow: ["Dizer que vai passar a parcela e entender o uso antes", "Perguntar quanto o carro fica parado"],
-  avoid: ["Mandar a tabela de parcelas antes de entender o uso"]
+  doNow: [
+    "Acolha a pergunta da parcela e combine o retorno: assim ele sente que foi ouvido.",
+    "Tente entender quanto o carro fica parado, porque é isso que pesa no trabalho dele."
+  ],
+  avoid: ["Mandar a tabela de parcelas antes de entender o uso: ele compararia só pelo preço."],
+  replies: ["Te passo a parcela, sim! Para indicar o melhor plano: quantos dias o carro ficou parado este mês?"]
 }
 
 // `config` lê process.env no import, então cada teste recarrega o módulo com o env desejado.
@@ -98,7 +102,8 @@ describe("pitacoSchema", () => {
       "questions",
       "warnings",
       "doNow",
-      "avoid"
+      "avoid",
+      "replies"
     ])
     const json = JSON.stringify(format.json_schema.schema)
     expect(json).not.toMatch(/suggestedText|message"|maxItems|minimum/)
@@ -118,7 +123,8 @@ describe("pitacoSchema", () => {
       questions: many(reply.questions[0]),
       avoid: many("x"),
       warnings: many("x"),
-      doNow: many("x")
+      doNow: many("x"),
+      replies: many("x")
     })
     expect([
       limited.path.length,
@@ -126,8 +132,9 @@ describe("pitacoSchema", () => {
       limited.questions.length,
       limited.avoid.length,
       limited.warnings.length,
-      limited.doNow.length
-    ]).toEqual([4, 4, 5, 3, 3, 4])
+      limited.doNow.length,
+      limited.replies.length
+    ]).toEqual([4, 4, 5, 3, 3, 4, 4])
   })
 })
 
@@ -140,8 +147,21 @@ describe("buildPitacoPrompt", () => {
     expect(prompt.user).toContain("[4] CLIENTE: Quanto fica a parcela?")
   })
 
+  it("diz de quem é a vez de falar, ignorando modelos e bot", () => {
+    const vez = (messages: ChatMessage[]) => /<vez>(.*)<\/vez>/.exec(buildPitacoPrompt(messages).user)?.[1]
+    expect(vez(conversation)).toMatch(/^VENDEDOR: a última mensagem é do cliente \(\[4\]\)/)
+    const asked: ChatMessage[] = [
+      ...conversation,
+      { id: 5, author: "vendedor", text: "Te passo, sim! Quantos dias ele ficou parado?" },
+      { id: 6, author: "vendedor", text: "Oferta da semana!", template: true },
+      { id: 7, author: "bot", text: "Avalie o atendimento." }
+    ]
+    expect(vez(asked)).toMatch(/^CLIENTE: a última mensagem é do vendedor \(\[5\]\)/)
+    expect(vez([])).toMatch(/^Ninguém falou ainda/)
+  })
+
   it("traz as regras do SPIN e proíbe a mensagem pronta", () => {
-    expect(TASK_PITACO).toContain("Nunca escreva a mensagem do vendedor")
+    expect(TASK_PITACO).toContain("## Mensagem pronta só em \"replies\"")
     expect(TASK_PITACO).toContain("Não repita perguntas já respondidas")
     expect(TASK_PITACO).toContain("não sugira apresentar solução")
     expect(TASK_PITACO).toContain("pergunta direta do cliente (ex.: preço) nunca fica")
@@ -156,8 +176,10 @@ describe("buildPitacoPrompt", () => {
 
   it("avalia o BANT e pede o resumo Fazer / Não fazer por último, curto e sem jargão", () => {
     for (const term of ["budget", "authority", "need", "timing", '"cumprido"']) expect(TASK_PITACO).toContain(term)
-    expect(TASK_PITACO).toContain("## Resumo: Fazer e Não fazer")
-    expect(TASK_PITACO).toContain("sem nomes de método")
+    expect(TASK_PITACO).toContain("## Resumo: Fazer, Não fazer e Sugestões de respostas")
+    expect(TASK_PITACO).toContain("CONSELHOS de um colega experiente, não ordens")
+    expect(TASK_PITACO).toContain("sem nomes de")
+    expect(TASK_PITACO).toContain("sem inventar o dado")
     expect(TASK_PITACO).toMatch(/Nunca coloque "não responder"[\s\S]*em "avoid"/)
   })
 })
@@ -204,18 +226,61 @@ describe("sanitizePitaco", () => {
     expect(result.questions).toEqual([reply.questions[0]])
   })
 
-  it("descarta tópico do resumo vazio, longo ou com quebra de linha", async () => {
+  it("descarta conselho do resumo vazio, longo ou com quebra de linha", async () => {
     const { sanitizePitaco } = await loadService()
     const result = sanitizePitaco(
       {
         ...reply,
-        doNow: ["  Perguntar quanto o carro fica parado  ", "", "z".repeat(161), "Oi Marcos!\nTudo bem?"],
+        doNow: ["  Perguntar quanto o carro fica parado (#3)  ", "", "z".repeat(241), "Oi Marcos!\nTudo bem?"],
         avoid: ["   ", reply.avoid[0]]
       },
       conversation
     )
     expect(result.doNow).toEqual(["Perguntar quanto o carro fica parado"])
     expect(result.avoid).toEqual(reply.avoid)
+  })
+
+  it("com o vendedor falando por último, descarta a sugestão que repete a pergunta dele", async () => {
+    const { sanitizePitaco } = await loadService()
+    const waiting: ChatMessage[] = [
+      { id: 1, author: "cliente", text: "Vi sim. Mas agora não." },
+      {
+        id: 2,
+        author: "vendedor",
+        text: "Sem problemas, Sergio! Só pra eu entender melhor: você tem algum prazo em mente para trocar de carro?"
+      }
+    ]
+    const kept = [
+      "Sem pressa, Sergio. Quando puder, me conta: o que você procura num carro novo?",
+      "Entendo que agora não é o momento. Posso te perguntar o que está pesando na decisão?"
+    ]
+    const repeated = [
+      "Tranquilo. Só para eu te ajudar melhor: você tem algum prazo em mente para a troca?",
+      "Entendo que agora não é o momento. Quando fizer sentido, me diz se você tem algum prazo em mente para a troca."
+    ]
+    const replies = [...kept, ...repeated]
+    expect(sanitizePitaco({ ...reply, replies }, waiting).replies).toEqual(kept)
+    // Com a resposta do cliente por último, a mesma pergunta volta a valer.
+    const answered = [...waiting, { id: 3, author: "cliente", text: "Não sei ainda." } as ChatMessage]
+    expect(sanitizePitaco({ ...reply, replies }, answered).replies).toEqual(replies.slice(0, 4))
+  })
+
+  it("descarta sugestão de resposta vazia, longa, com marcador ou nome genérico, e tira o #n", async () => {
+    const { sanitizePitaco } = await loadService()
+    const result = sanitizePitaco(
+      {
+        ...reply,
+        replies: [
+          "  ",
+          "A parcela fica em [valor] por mês.",
+          "Entendo, Fulano. O que pesou no valor?",
+          "w".repeat(501),
+          `  ${reply.replies[0]} (#4)`
+        ]
+      },
+      conversation
+    )
+    expect(result.replies).toEqual(reply.replies)
   })
 })
 

@@ -45,8 +45,12 @@ export const MAX_PITACO_AVOID = 3
 export const MAX_PITACO_WARNINGS = 3
 // Resumo da visão simples: o que fazer e o que não fazer agora.
 export const MAX_PITACO_DO = 4
-/** Tópico do resumo acima disso (ou com quebra de linha) virou parágrafo: é descartado. */
-export const MAX_PITACO_TOPIC_CHARS = 160
+/** Conselho do resumo acima disso (ou com quebra de linha) virou parágrafo: é descartado. */
+export const MAX_PITACO_TOPIC_CHARS = 240
+// Sugestões de resposta: as únicas mensagens prontas do Pitaco, para enviar por texto ou áudio.
+export const MAX_PITACO_REPLIES = 4
+/** Sugestão acima disso deixa de ser uma mensagem de WhatsApp: é descartada. */
+export const MAX_PITACO_REPLY_CHARS = 500
 /** Pergunta maior que isso deixa de ser pergunta e vira mensagem pronta: é descartada. */
 export const MAX_PITACO_QUESTION_CHARS = 200
 /** A dica é direção de raciocínio; acima disso (ou com quebra de linha) ela é descartada. */

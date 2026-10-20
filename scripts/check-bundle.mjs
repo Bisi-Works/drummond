@@ -113,8 +113,9 @@ const fakeModel = {
     points: [{ stage: "situacao", kind: "descobrir", title: "O que motivou o contato", why: "Só houve saudação (#1).", hint: "Entender o objetivo.", evidence: [1, 9] }],
     questions: [{ stage: "situacao", text: "O que fez você procurar a gente agora?", evidence: [1] }],
     warnings: [],
-    doNow: ["Perguntar o que motivou o contato"],
-    avoid: ["Falar de preço antes de entender o objetivo"]
+    doNow: ["Tente entender o que motivou o contato, porque ele só cumprimentou até agora."],
+    avoid: ["Evite falar de preço antes de entender o objetivo dele."],
+    replies: ["Que bom falar com você! O que te fez procurar a gente agora?"]
   },
   // Relatório diário da rota "generate-report" (e do botão "Encerrar o dia" no widget).
   daily: {
@@ -280,7 +281,7 @@ try {
   )
   const pitacoRequest = requests.at(-1)
   check(
-    validFormat(pitacoRequest, "stages,bant,stageNow,diagnosis,path,points,questions,warnings,doNow,avoid") &&
+    validFormat(pitacoRequest, "stages,bant,stageNow,diagnosis,path,points,questions,warnings,doNow,avoid,replies") &&
       pitacoRequest?.provider?.require_parameters === true && !pitacoRequest?.stream,
     `pitaco: formato completo, provedor compatível e sem streaming (${describeRequest(pitacoRequest)})`
   )
@@ -597,8 +598,16 @@ try {
   check(
     text.includes("Fazer") && text.includes(fakeModel.pitaco.doNow[0]) && text.includes("Não fazer") &&
       text.includes(fakeModel.pitaco.avoid[0]) && !text.includes(fakeModel.pitaco.diagnosis) &&
+      text.includes("Sugestões de respostas") && text.includes(fakeModel.pitaco.replies[0]) &&
       text.includes("inclui 1 áudio transcrito"),
-    "drawer abre na visão simples (Fazer / Não fazer) e mostra o áudio transcrito"
+    "drawer abre na visão simples (Fazer / Não fazer / Sugestões de respostas) e mostra o áudio transcrito"
+  )
+  const buttonLabels = () => Array.from(drawer?.querySelectorAll("button") ?? []).map((b) => b.getAttribute("aria-label") ?? b.textContent.trim())
+  const simpleLabels = buttonLabels()
+  check(
+    simpleLabels.filter((label) => label === "Copiar sugestão").length === fakeModel.pitaco.replies.length &&
+      !simpleLabels.includes("Copiar pergunta"),
+    `visão simples: cada sugestão de resposta tem o seu botão de copiar (${simpleLabels.join(" · ")})`
   )
   const drawerButton = (label) => Array.from(drawer?.querySelectorAll("button") ?? []).find((b) => b.textContent.trim() === label)
   drawerButton("Avançado")?.click()
@@ -609,11 +618,12 @@ try {
       advanced.includes(fakeModel.pitaco.questions[0].text) && !!drawerButton("Simples"),
     "Avançado mostra a análise completa (SPIN, BANT, diagnóstico e perguntas)"
   )
-  const labels = Array.from(drawer?.querySelectorAll("button") ?? []).map((b) => b.getAttribute("aria-label") ?? b.textContent.trim())
+  const labels = buttonLabels()
   check(
-    !labels.some((label) => /aplicar/i.test(label)) &&
-      labels.filter((label) => label === "Copiar pergunta").length === fakeModel.pitaco.questions.length,
-    `drawer sem "Aplicar"; só as perguntas são copiáveis (${labels.join(" · ")})`
+    ![...simpleLabels, ...labels].some((label) => /aplicar/i.test(label)) &&
+      labels.filter((label) => label === "Copiar pergunta").length === fakeModel.pitaco.questions.length &&
+      !labels.includes("Copiar sugestão"),
+    `drawer sem "Aplicar"; no Avançado, só as perguntas são copiáveis (${labels.join(" · ")})`
   )
 
   window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }))

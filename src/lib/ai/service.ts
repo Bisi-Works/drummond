@@ -5,7 +5,12 @@ import type { DailyReportInput } from "~lib/tracking/report"
 import { estimateCost, estimateTokens, pricingRange, type CostEstimate, type CostInfo } from "./cost"
 import { chatCompletion, fetchModelEndpoints, OpenRouterError } from "./openrouter"
 import { parseModelJson } from "./parse"
-import { MAX_PITACO_HINT_CHARS, MAX_PITACO_QUESTION_CHARS, MAX_PITACO_TOPIC_CHARS } from "./constants"
+import {
+  MAX_PITACO_HINT_CHARS,
+  MAX_PITACO_QUESTION_CHARS,
+  MAX_PITACO_REPLY_CHARS,
+  MAX_PITACO_TOPIC_CHARS
+} from "./constants"
 import {
   buildCoachPrompt,
   buildDailyReportPrompt,
@@ -175,12 +180,45 @@ export const dropInvalidImprovements = (
   })
 })
 
+// Palavras que não dizem o assunto de uma pergunta ("você tem algum…", "para eu entender melhor…").
+const FILLER = new Set(
+  "voce para isso esse essa como quando mais melhor entender algum alguma sobre pode posso gente aqui agora ainda assim porque entao tudo minha meu seu sua tem ter queria quer ajudar".split(" ")
+)
+
+/** Assunto de um texto: radicais (5 letras, sem acento) das palavras de 4+ letras que não são enchimento. */
+const subject = (text: string) =>
+  new Set(
+    (text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().match(/[a-z]{4,}/g) ?? [])
+      .filter((word) => !FILLER.has(word))
+      .map((word) => word.slice(0, 5))
+  )
+
+/**
+ * Se o vendedor falou por último (texto livre, ainda sem resposta do cliente), o assunto da última
+ * pergunta dele; senão, null.
+ */
+const unansweredSellerQuestion = (conversation: ChatMessage[]) => {
+  const last = conversation.findLast((m) => m.author === "cliente" || (m.author === "vendedor" && !m.template))
+  if (last?.author !== "vendedor") return null
+  const question = (last.transcript ?? last.text).split(/(?<=[.!?])\s+/).findLast((s) => s.includes("?"))
+  const asked = question ? subject(question) : null
+  return asked && asked.size >= 2 ? asked : null
+}
+
+/** Alguma frase da sugestão volta ao assunto da pergunta que o cliente ainda não respondeu. */
+const repeatsQuestion = (reply: string, asked: Set<string>) =>
+  reply
+    .split(/(?<=[.!?])\s+/)
+    .some((sentence) => [...subject(sentence)].filter((word) => asked.has(word)).length >= asked.size * 0.6)
+
 /**
  * Mantém o Pitaco ancorado na conversa e longe de mensagem pronta: tira de `evidence` os números
  * que não existem; descarta o ponto ou a pergunta que só citava mensagens inexistentes (o modelo
  * inventou a base); descarta perguntas longas ou com quebra de linha (viraram texto para enviar) e
- * esvazia a dica nas mesmas condições; no resumo Fazer / Não fazer, descarta o tópico vazio, longo ou
- * com quebra de linha. Depois limita as listas.
+ * esvazia a dica nas mesmas condições; no resumo Fazer / Não fazer, descarta o conselho vazio, longo
+ * ou com quebra de linha; nas sugestões de resposta, descarta a vazia, a longa demais, a que traz
+ * marcador de preenchimento ou nome genérico e a que repete a pergunta que o vendedor acabou de fazer.
+ * Depois limita as listas.
  */
 export const sanitizePitaco = (pitaco: Pitaco, conversation: ChatMessage[]): Pitaco => {
   const ids = new Set(conversation.map((m) => m.id))
@@ -189,8 +227,15 @@ export const sanitizePitaco = (pitaco: Pitaco, conversation: ChatMessage[]): Pit
     return item.evidence.length > 0 && evidence.length === 0 ? null : { ...item, evidence }
   }
   const short = (text: string, max: number) => !/\n/.test(text.trim()) && text.trim().length <= max
+  // O resumo é lido sem a conversa ao lado: citação de mensagem ("(#6)", "#6") só atrapalha.
+  const uncited = (text: string) =>
+    text
+      .replace(/\s*\(#\d+(?:\s*[,e]\s*#\d+)*\)/g, "")
+      .replace(/\s*#\d+\b/g, "")
+      .trim()
   const topics = (items: string[]) =>
-    items.map((item) => item.trim()).filter((item) => item && short(item, MAX_PITACO_TOPIC_CHARS))
+    items.map(uncited).filter((item) => item && short(item, MAX_PITACO_TOPIC_CHARS))
+  const asked = unansweredSellerQuestion(conversation)
 
   return limitPitaco({
     ...pitaco,
@@ -203,7 +248,20 @@ export const sanitizePitaco = (pitaco: Pitaco, conversation: ChatMessage[]): Pit
       .filter((question) => question !== null)
       .filter((question) => question.text.trim() && short(question.text, MAX_PITACO_QUESTION_CHARS)),
     doNow: topics(pitaco.doNow),
-    avoid: topics(pitaco.avoid)
+    avoid: topics(pitaco.avoid),
+    // Marcador de preenchimento ("[valor]") ou nome genérico ("Fulano") seria um dado a inventar na
+    // hora de enviar.
+    replies: pitaco.replies
+      .map(uncited)
+      .filter(
+        (reply) =>
+          reply &&
+          reply.length <= MAX_PITACO_REPLY_CHARS &&
+          !/\[[^\]]*\]/.test(reply) &&
+          !/\b(fulan|ciclan|beltran)[oa]\b/i.test(reply) &&
+          // Repetir a pergunta que o vendedor acabou de fazer, antes de o cliente responder.
+          !(asked && repeatsQuestion(reply, asked))
+      )
   })
 }
 

@@ -44,6 +44,31 @@ vermelha **Não fazer** (até 3). O botão **Avançado** no cabeçalho alterna p
   saída); Avançado mostra SPIN e BANT clicáveis; Atualizar mantém o modo; Esc + reabrir volta ao
   simples sem nova geração. `check:bundle` 54/54 na produção e 53/53 no dev; 472 testes.
 
+## Conselhos e sugestões de respostas (20/10/2026)
+
+Pedido do usuário: em vez de ordens ("Perguntar como ele se locomove"), conselhos que explicam o
+porquê ("Tente entender como ele se locomove hoje, porque…"), e uma seção **Sugestões de
+respostas** com 1 a 4 mensagens para enviar por texto ou falar em áudio.
+
+- **Mensagem pronta só em `replies`**, o último campo do schema, escrito depois de Fazer / Não
+  fazer. Cada sugestão tem "⧉ Copiar" (sem "Aplicar"); no modo Avançado continuam só as perguntas.
+- **Prompt 2026-10-20.7:** conselhos na segunda pessoa, até 25 palavras, com o porquê; "Não fazer"
+  começando com "Evite". Sugestões sem fato novo, sem marcador, com o primeiro nome só se ele
+  aparece na conversa (o modelo usava "Fulano") e terminando em pergunta aberta quando fizer sentido.
+- **De quem é a vez (`<vez>`):** no app, a conversa do Sergio terminava numa pergunta do vendedor
+  sem resposta, e o Pitaco mandava responder de novo ao "Não agora não". Só com a regra no prompt,
+  a conversa longa (caso P6) acertava 1/5; com a vez calculada no código e enviada depois da
+  `<conversa>`, 5/5. Nesse caso o primeiro conselho é aguardar e as sugestões são retomadas.
+- **Service:** tira `#n` dos conselhos e sugestões; descarta sugestão com marcador `[…]`, nome
+  genérico (Fulano/Ciclano/Beltrano), mais de 500 caracteres ou que repete o assunto da pergunta que
+  o vendedor acabou de fazer (quando a vez é do cliente).
+- **`pnpm bench:pitaco`** (6 casos × 5, P5 e P6 novos): 29/30. A falha: "aprofundar a implicação"
+  num conselho. "Evite ignorar o papel da sócia; sem envolvê-la…" aparece às vezes no Não fazer e
+  ficou aceito (é claro, só repete o Fazer). Tempo: mediana 5,6 s, p90 9,1 s.
+- **No app real (Sergio):** primeiro conselho "Aguarde a resposta do cliente sobre o prazo…", 3
+  sugestões de retomada, "Copiar" mostra "✓ Copiada"; Avançado com BANT e 4 perguntas copiáveis.
+  `check:bundle` 55/55 na produção e 54/54 no dev; 475 testes.
+
 ## Tasks
 
 - [x] Transformar o botão atual num container flexível com **Revisar** e **Pitaco**, mantendo o

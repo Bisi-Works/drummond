@@ -55,21 +55,43 @@ const Skeleton = ({ lines = 1 }: { lines?: number }) => (
   </div>
 )
 
-/** Só a pergunta é copiável: os pontos são direção de raciocínio, não texto para enviar. */
-const CopyQuestion = ({ text }: { text: string }) => {
+const useCopy = (text: string) => {
   const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    await navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+  return [copied, copy] as const
+}
+
+/**
+ * Só perguntas e sugestões de resposta são copiáveis: conselhos e pontos são direção de raciocínio,
+ * não texto para enviar.
+ */
+const CopyQuestion = ({ text }: { text: string }) => {
+  const [copied, copy] = useCopy(text)
   return (
     <button
       type="button"
-      onClick={async () => {
-        await navigator.clipboard.writeText(text)
-        setCopied(true)
-        setTimeout(() => setCopied(false), 1500)
-      }}
+      onClick={copy}
       aria-label={copied ? "Pergunta copiada" : "Copiar pergunta"}
       title="Copiar pergunta"
       className="shrink-0 rounded-md border border-line-strong px-1.5 py-0.5 text-xs text-fg-muted hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
       {copied ? "✓" : "⧉"}
+    </button>
+  )
+}
+
+const CopyReply = ({ text }: { text: string }) => {
+  const [copied, copy] = useCopy(text)
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      aria-label={copied ? "Sugestão copiada" : "Copiar sugestão"}
+      className="rounded-md border border-line-strong px-2 py-0.5 text-xs font-medium text-fg-muted hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
+      {copied ? "✓ Copiada" : "⧉ Copiar"}
     </button>
   )
 }
@@ -215,8 +237,9 @@ const Topics = ({ tone, title, items }: { tone: keyof typeof TOPIC_TONE; title: 
 }
 
 /**
- * Visão inicial: só o que fazer e o que não fazer agora. O modelo escreve esse resumo por último,
- * depois de passar pelo SPIN, pelo BANT e pelos fatos a confirmar, que ficam no modo Avançado.
+ * Visão inicial: conselhos do que fazer e do que não fazer agora, e sugestões de resposta. O modelo
+ * escreve esse resumo por último, depois de passar pelo SPIN, pelo BANT e pelos fatos a confirmar,
+ * que ficam no modo Avançado.
  * Se o resumo vier vazio (o service descarta tópico longo demais), o caminho faz as vezes do Fazer.
  */
 const SimpleBody = ({ pitaco }: { pitaco: Pitaco }) => {
@@ -225,6 +248,21 @@ const SimpleBody = ({ pitaco }: { pitaco: Pitaco }) => {
     <>
       {doNow.length > 0 && <Topics tone="fazer" title="Fazer" items={doNow} />}
       {pitaco.avoid.length > 0 && <Topics tone="naoFazer" title="Não fazer" items={pitaco.avoid} />}
+      {pitaco.replies.length > 0 && (
+        <Section title="Sugestões de respostas">
+          <p className="text-xs text-fg-muted">Para enviar por texto ou falar em áudio. Ajuste ao seu jeito antes.</p>
+          <ul className="space-y-2">
+            {pitaco.replies.map((reply, i) => (
+              <li key={i} className="space-y-2 rounded-lg border border-line p-3">
+                <p className="text-sm leading-relaxed text-fg">{reply}</p>
+                <div className="flex justify-end">
+                  <CopyReply text={reply} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
     </>
   )
 }
@@ -389,6 +427,7 @@ export const PitacoDrawer = ({ state, contactName, onRefresh, onClose }: Props) 
             <div className="space-y-4" aria-hidden="true">
               <div className="h-32 animate-pulse rounded-lg bg-muted" />
               <div className="h-24 animate-pulse rounded-lg bg-muted" />
+              <Skeleton lines={3} />
             </div>
           ))}
 

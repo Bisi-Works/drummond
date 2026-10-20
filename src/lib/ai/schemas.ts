@@ -18,6 +18,7 @@ import {
   MAX_PITACO_PATH,
   MAX_PITACO_POINTS,
   MAX_PITACO_QUESTIONS,
+  MAX_PITACO_REPLIES,
   MAX_PITACO_WARNINGS,
   MAX_STRENGTHS,
   pitacoPointKinds,
@@ -127,8 +128,8 @@ export const dailyReportSchema = z.object({
     )
 })
 
-// Pitaco: orientação de condução pelo SPIN, nunca uma mensagem pronta (não existe campo de texto
-// para enviar). `evidence` traz os números [n] das mensagens que sustentam o item; o service
+// Pitaco: orientação de condução pelo SPIN; mensagem pronta só em `replies`, as sugestões de
+// resposta. `evidence` traz os números [n] das mensagens que sustentam o item; o service
 // descarta os números que não existem na conversa. As etapas vêm primeiro: o modelo gera na ordem
 // do schema e decide a etapa atual e o caminho depois de olhar a evidência de cada uma.
 const spinStageSchema = z.object({
@@ -205,8 +206,11 @@ export const pitacoSchema = z.object({
   // O resumo vem por último: o modelo o escreve depois de toda a análise acima.
   doNow: z
     .array(z.string())
-    .describe(`Até ${MAX_PITACO_DO} ações curtas a fazer agora, da mais para a menos urgente.`),
-  avoid: z.array(z.string()).describe(`Até ${MAX_PITACO_AVOID} coisas a não fazer agora.`)
+    .describe(`Até ${MAX_PITACO_DO} conselhos do que fazer agora e por quê, do mais para o menos urgente.`),
+  avoid: z.array(z.string()).describe(`Até ${MAX_PITACO_AVOID} coisas a não fazer agora, com o motivo.`),
+  replies: z
+    .array(z.string())
+    .describe(`1 a ${MAX_PITACO_REPLIES} mensagens prontas para enviar por texto ou falar em áudio.`)
 })
 
 export type DraftReview = z.infer<typeof draftReviewSchema>
@@ -251,7 +255,8 @@ export const limitPitaco = (pitaco: Pitaco): Pitaco => ({
   questions: pitaco.questions.slice(0, MAX_PITACO_QUESTIONS),
   avoid: pitaco.avoid.slice(0, MAX_PITACO_AVOID),
   warnings: pitaco.warnings.slice(0, MAX_PITACO_WARNINGS),
-  doNow: pitaco.doNow.slice(0, MAX_PITACO_DO)
+  doNow: pitaco.doNow.slice(0, MAX_PITACO_DO),
+  replies: pitaco.replies.slice(0, MAX_PITACO_REPLIES)
 })
 
 /** Trunca as quatro listas do relatório diário em `MAX_REPORT_ITEMS`, preservando a ordem. */
