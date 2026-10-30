@@ -1,7 +1,7 @@
 {
   "name": "drummond-by-bw",
   "displayName": "Drummond by BW",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Revisão e coaching de mensagens de vendas no Botconversa com IA (uso interno).",
   "author": "BW <bw@bisi.works>",
   "private": true,
