@@ -26,7 +26,7 @@ import { audioSummary, type AudioSummary } from "~lib/transcripts/prepare"
 
 // Precisa listar os mesmos domínios que os `hosts` dos adapters (o Plasmo lê este objeto estaticamente).
 export const config: PlasmoCSConfig = {
-  matches: ["https://app.botconversa.com.br/*"]
+  matches: ["https://app.botconversa.com.br/*", "https://web.whatsapp.com/*"]
 }
 
 // A UI roda num shadow DOM: o CSS do Tailwind é injetado nele, isolado do CSS da página.
@@ -37,14 +37,17 @@ export const getStyle: PlasmoGetStyle = () => {
 }
 
 const adapter = getAdapter(location.hostname)
-if (adapter) registerBrandFont()
+if (adapter) {
+  registerBrandFont()
+  adapter.install?.()
+}
 
 // Responde ao side panel com a conversa aberta, já com as transcrições: o coaching usa o mesmo cache
 // do Revisar e do Pitaco (um áudio só é transcrito uma vez). Se a preparação falhar, a conversa vai
 // sem transcrição, com o marcador `[áudio]`. Só responde ao próprio nome; `true` mantém o canal
 // aberto até a resposta assíncrona.
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.name !== GET_CONVERSATION || !adapter) return
+  if (message?.name !== GET_CONVERSATION || !adapter?.features.coaching) return
   const conversationKey = adapter.getConversationKey()
   const raw = adapter.readConversation(appConfig.coachMessages)
   const reply = (conversation: typeof raw) =>
@@ -90,11 +93,15 @@ const drawerWidth = (frame: Box | null) => {
 const pillBase =
   "flex items-center gap-1.5 rounded-full border pl-2.5 pr-3 text-xs font-medium shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
 
-// Na barra do campo, logo à direita da âncora (espaço livre); sem âncora, flutua acima do campo.
-const buttonPosition = (frame: Box, anchor: Box | null) =>
-  anchor
-    ? { top: anchor.top + (anchor.height - BUTTON_HEIGHT) / 2, left: anchor.right + BUTTON_GAP }
-    : { top: frame.top - BUTTON_HEIGHT - BUTTON_GAP, right: window.innerWidth - frame.right }
+// Na barra do campo, colado na âncora (à direita, ou à esquerda com `before`); sem âncora, flutua
+// acima do campo.
+const buttonPosition = (frame: Box, anchor: Box | null, side: "after" | "before" = "after") => {
+  if (!anchor) return { top: frame.top - BUTTON_HEIGHT - BUTTON_GAP, right: window.innerWidth - frame.right }
+  const top = anchor.top + (anchor.height - BUTTON_HEIGHT) / 2
+  return side === "before"
+    ? { top, right: window.innerWidth - anchor.left + BUTTON_GAP }
+    : { top, left: anchor.right + BUTTON_GAP }
+}
 
 const APPLY_FAILED =
   "Não consegui inserir o texto no campo automaticamente. Use “Copiar” e cole a mensagem no campo."
@@ -190,15 +197,17 @@ const Companion = () => {
       audio = audioSummary(conversation.slice(-appConfig.contextMessages))
       response = await sendToBackground<ReviewDraftRequest, ReviewDraftResponse>({
         name: "review-draft",
-        body: { conversation, draft: text }
+        body: { conversation, draft: text, platform: adapter.id, contactName: adapter.getContactName?.() }
       })
     } catch {
       // Acontece quando a extensão é recarregada com a página aberta.
-      response = failure("A extensão foi atualizada. Recarregue a página do Botconversa.")
+      response = failure("A extensão foi atualizada. Recarregue a página.")
     }
     if (id === requestId.current) setReview({ kind: "done", draft: text, response, audio })
     // A revisão já foi feita: só se anexa o que a extensão já produziu, sem chamada de IA nova.
-    if (response.ok && key) void recordReview(key, reviewSignal(response.data, Date.now()))
+    if (response.ok && key && adapter.features.dayTracking) {
+      void recordReview(key, reviewSignal(response.data, Date.now()))
+    }
   }
 
   // Só fecha o card se o texto realmente entrou no campo; senão mantém a sugestão e explica.
@@ -226,7 +235,9 @@ const Companion = () => {
 
   return (
     <div className={theme === "dark" ? "dark font-sans" : "font-sans"}>
-      <InboxBar adapter={adapter} slot={headerSlot} activeKey={conversationKey} />
+      {adapter.features.dayTracking && (
+        <InboxBar adapter={adapter} slot={headerSlot} activeKey={conversationKey} />
+      )}
 
       {composerFrame && (
         <>
@@ -234,7 +245,7 @@ const Companion = () => {
             style={{
               position: "fixed",
               height: BUTTON_HEIGHT,
-              ...buttonPosition(composerFrame, buttonAnchor)
+              ...buttonPosition(composerFrame, buttonAnchor, adapter.buttonSide)
             }}
             className="flex items-stretch gap-1.5">
             <button
@@ -250,17 +261,19 @@ const Companion = () => {
               )}
               {copied ? "Copiado ✓" : review.kind === "idle" ? "Revisar" : "Fechar"}
             </button>
-            <button
-              type="button"
-              onClick={togglePitaco}
-              aria-pressed={pitaco.isOpen}
-              title={pitaco.isOpen ? "Fechar o Pitaco" : "Pitaco: por onde seguir a conversa (SPIN)"}
-              className={`${pillBase} border-black ${
-                pitaco.isOpen ? "bg-black text-white hover:bg-gray-800" : "bg-white text-black hover:bg-gray-100"
-              }`}>
-              <PitacoMark />
-              Pitaco
-            </button>
+            {adapter.features.pitaco && (
+              <button
+                type="button"
+                onClick={togglePitaco}
+                aria-pressed={pitaco.isOpen}
+                title={pitaco.isOpen ? "Fechar o Pitaco" : "Pitaco: por onde seguir a conversa (SPIN)"}
+                className={`${pillBase} border-black ${
+                  pitaco.isOpen ? "bg-black text-white hover:bg-gray-800" : "bg-white text-black hover:bg-gray-100"
+                }`}>
+                <PitacoMark />
+                Pitaco
+              </button>
+            )}
           </div>
 
           {review.kind !== "idle" && (

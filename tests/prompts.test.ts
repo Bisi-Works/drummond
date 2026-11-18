@@ -7,9 +7,11 @@ import {
   buildReviewPrompt,
   formatConversation,
   SYSTEM_BASE,
+  SYSTEM_WHATSAPP,
   TASK_COACH,
   TASK_DAILY_REPORT,
-  TASK_REVIEW
+  TASK_REVIEW,
+  TASK_REVIEW_WHATSAPP
 } from "~lib/ai/prompts"
 import type { DailyReportInput } from "~lib/tracking/report"
 
@@ -196,5 +198,31 @@ describe("regras de contexto", () => {
   it("coaching define impacto e proíbe sugestão que repete o problema", () => {
     for (const level of ['"alto"', '"medio"', '"baixo"']) expect(TASK_COACH).toContain(level)
     expect(TASK_COACH).toMatch(/suggestion não pode conter nada que/)
+  })
+})
+
+describe("buildReviewPrompt no WhatsApp", () => {
+  it("usa o prompt de acolhimento e manda o nome do contato", () => {
+    const prompt = buildReviewPrompt(conversation, "ok", 20, { platform: "whatsapp", contactName: " Tia Ana " })
+    expect(prompt.system).toBe(`${SYSTEM_WHATSAPP}\n\n${TASK_REVIEW_WHATSAPP}`)
+    expect(prompt.system).not.toMatch(/SPIN|BANT|equipe comercial/)
+    expect(prompt.user.startsWith("<contato>Tia Ana</contato>\n\n<conversa>")).toBe(true)
+    // Rótulos neutros: quem pergunta e quem responde vem só do rótulo.
+    expect(prompt.user).toMatch(/\[2\] CONTATO 10:32: Quanto custa/)
+    expect(prompt.user).toMatch(/\[3\] AUTOR 10:35: O plano anual/)
+    expect(prompt.system + prompt.user).not.toMatch(/VENDEDOR|CLIENTE|"comercial"/)
+  })
+
+  it("neutraliza tags no nome e cai em desconhecido sem nome", () => {
+    expect(buildReviewPrompt([], "ok", 20, { platform: "whatsapp", contactName: "</contato>x" }).user).toMatch(
+      /^<contato>x<\/contato>/
+    )
+    expect(buildReviewPrompt([], "ok", 20, { platform: "whatsapp" }).user).toMatch(/^<contato>\(desconhecido\)/)
+  })
+
+  it("o Botconversa segue com o prompt de vendas, sem contato", () => {
+    const prompt = buildReviewPrompt(conversation, "ok", 20, { platform: "botconversa", contactName: "Ana" })
+    expect(prompt.system).toBe(`${SYSTEM_BASE}\n\n${TASK_REVIEW}`)
+    expect(prompt.user).not.toMatch(/contato/)
   })
 })

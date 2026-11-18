@@ -26,6 +26,15 @@
         "value": "geist",
         "createdAt": "2026-10-14T14:18:56.692Z",
         "reason": "README documents Geist as the Bisi Works brand font (identidade visual: vermelho #e7191f, preto, branco e a fonte Geist); promo tile must match the extension brand"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "tests/whatsapp.test.ts"
+        ],
+        "createdAt": "2026-11-18T17:13:58.826Z",
+        "reason": "model: test fixture mimicking WhatsApp emoji <img alt>, never rendered"
       }
     ]
   }

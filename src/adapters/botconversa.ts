@@ -338,6 +338,7 @@ const fetchAudio = async (url: string, mimeType?: string): Promise<ChatAudio | n
 export const botconversaAdapter: ChatAdapter = {
   id: "botconversa",
   hosts: ["app.botconversa.com.br"],
+  features: { pitaco: true, dayTracking: true, coaching: true },
 
   getComposer: () => document.querySelector<HTMLElement>(SELECTORS.composer),
 

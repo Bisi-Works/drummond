@@ -17,6 +17,7 @@
     "bench:closing": "vitest run -c vitest.benchmark.config.ts closing",
     "bench:audio": "vitest run -c vitest.benchmark.config.ts audio-prompts",
     "bench:pitaco": "vitest run -c vitest.benchmark.config.ts pitaco",
+    "bench:whatsapp": "vitest run -c vitest.benchmark.config.ts whatsapp",
     "release": "node scripts/release.mjs"
   },
   "dependencies": {
@@ -44,7 +45,8 @@
       "storage"
     ],
     "host_permissions": [
-      "https://openrouter.ai/*"
+      "https://openrouter.ai/*",
+      "https://web.whatsapp.com/*"
     ]
   }
 }

@@ -105,6 +105,11 @@ export interface ChatAdapter {
   id: string
   /** Hostnames atendidos (o `matches` do content script precisa listar os mesmos domínios). */
   hosts: string[]
+  /**
+   * Recursos além do Revisar (que toda plataforma tem): o Pitaco, a barra do dia (com o tracking
+   * das conversas) e o coaching do painel lateral.
+   */
+  features: { pitaco: boolean; dayTracking: boolean; coaching: boolean }
   /** Campo onde o vendedor digita (textarea ou contenteditable). */
   getComposer(): HTMLElement | null
   /** Caixa visual em volta do campo (o card de sugestão abre acima dela). Padrão: o próprio campo. */
@@ -114,6 +119,10 @@ export interface ChatAdapter {
    * ícones da esquerda, cujo lado direito costuma estar livre). Sem ele, o botão fica acima do campo.
    */
   getButtonAnchor?(): HTMLElement | null
+  /** `"before"`: o botão fica à ESQUERDA da âncora (o adapter reserva o espaço em `install`). */
+  buttonSide?: "after" | "before"
+  /** Ajustes na página feitos uma vez, quando o content script carrega (ex.: CSS). */
+  install?(): void
   readDraft(): string
   /**
    * Substitui o rascunho de forma que o editor/framework da página perceba a mudança.
