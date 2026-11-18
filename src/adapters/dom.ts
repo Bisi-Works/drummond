@@ -27,6 +27,13 @@ const sameText = (a: string, b: string) => a.replace(/\s+/g, " ").trim() === b.r
 
 const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0))
 
+// O rAF não roda em aba oculta: o timeout garante que a espera termina.
+const nextFrame = () =>
+  new Promise((resolve) => {
+    requestAnimationFrame(resolve)
+    setTimeout(resolve, 50)
+  })
+
 // Seleciona todo o conteúdo e espera o editor da página sincronizar a seleção: editores como o
 // Lexical escutam `selectionchange`, que o navegador dispara de forma assíncrona.
 const selectAllContents = async (el: HTMLElement) => {
@@ -76,6 +83,11 @@ export const setComposerText = async (el: HTMLElement, text: string): Promise<bo
     return sameText(el.value, text)
   }
 
+  // Clicar no nosso botão tira o foco e a seleção do campo. Ao receber o foco de volta, o Lexical do
+  // WhatsApp restaura o cursor antigo depois de nós: sem esperar, a seleção "tudo" se perdia e o
+  // texto era colado no fim do rascunho em vez de substituí-lo.
+  await nextFrame()
+  await nextTask()
   await selectAllContents(el)
   if (!dispatchPaste(el, text)) document.execCommand("insertText", false, text)
   await nextTask()

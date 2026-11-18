@@ -17,6 +17,7 @@ import {
   buildPitacoPrompt,
   buildReviewPrompt,
   PROMPT_VERSION,
+  type ReviewContext,
   type PromptMessages
 } from "./prompts"
 import {
@@ -265,10 +266,10 @@ export const sanitizePitaco = (pitaco: Pitaco, conversation: ChatMessage[]): Pit
   })
 }
 
-export const reviewDraft =(conversation: ChatMessage[], draft: string) =>
+export const reviewDraft = (conversation: ChatMessage[], draft: string, context: ReviewContext = {}) =>
   run(config.review, async (ctx) => {
     if (!draft.trim()) throw new Error("Digite uma mensagem antes de pedir a revisão.")
-    const prompt = buildReviewPrompt(conversation, draft, config.contextMessages)
+    const prompt = buildReviewPrompt(conversation, draft, config.contextMessages, context)
     const expectedOutput = estimateTokens(draft) + REVIEW_OVERHEAD_TOKENS
     const raw = await complete(ctx, config.review, prompt, reviewFormat, expectedOutput)
     return normalizeReview(parseModelJson(raw, draftReviewSchema), draft)
